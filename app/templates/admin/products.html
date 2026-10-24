@@ -1,0 +1,74 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Products{% endblock %}
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
+  <div><h2 class="mb-1">Products</h2><p class="text-muted mb-0">Select a brand to manage its products, or use Active / Inactive / All for the complete catalogue.</p></div>
+  <a class="btn btn-success" href="{{url_for('admin_product_new')}}">+ Add Product</a>
+</div>
+
+<div class="row g-3 mb-4">
+  {% for b in brands %}
+  <div class="col-6 col-md-3 col-xl-2">
+    <a class="text-decoration-none" href="{{url_for('admin_products', brand=b.brand)}}">
+      <div class="brand-box {% if selected_brand==b.brand %}brand-box-active{% endif %}">
+        <div class="brand-box-icon">📦</div>
+        <div class="fw-bold">{{b.brand}}</div>
+        <small class="text-muted">{{b.product_count}} products</small>
+      </div>
+    </a>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+  <a class="btn {{ 'btn-primary' if product_status=='ACTIVE' and not selected_brand else 'btn-outline-primary' }}" href="{{ url_for('admin_products', status='ACTIVE') }}">Active</a>
+  <a class="btn {{ 'btn-warning' if product_status=='INACTIVE' and not selected_brand else 'btn-outline-warning' }}" href="{{ url_for('admin_products', status='INACTIVE') }}">Inactive</a>
+  <a class="btn {{ 'btn-dark' if product_status=='ALL' and not selected_brand else 'btn-outline-dark' }}" href="{{ url_for('admin_products', status='ALL') }}">All</a>
+  {% if selected_brand %}
+    <span class="badge text-bg-light border fs-6">Brand: {{selected_brand}}</span>
+    <a class="btn btn-sm btn-outline-secondary" href="{{url_for('admin_products')}}">Show All Brands</a>
+  {% endif %}
+</div>
+
+<div class="panel table-responsive">
+<table class="table align-middle">
+<thead><tr><th>Code</th><th>Product</th><th>Brand</th><th>Category</th><th>MRP</th><th>Price</th><th>Stock</th><th>Status</th><th>Actions</th></tr></thead>
+<tbody>
+{% for p in products %}
+<tr>
+<td>{{p.product_code}}</td>
+<td><b>{{p.name}}</b></td>
+<td>{{p.brand or '-'}}</td>
+<td>{{p.category}}</td>
+<td>
+  <form method="post" action="{{url_for('admin_product_mrp',product_id=p.id)}}" class="d-flex gap-1 align-items-center">
+    <input type="hidden" name="filter" value="{{product_status}}">
+    <input type="hidden" name="brand" value="{{selected_brand}}">
+    <input class="form-control form-control-sm" style="width:105px" type="number" step="0.01" min="0" name="mrp" value="{{p.mrp or 0}}">
+    <button class="btn btn-sm btn-outline-primary" type="submit">Save</button>
+  </form>
+</td>
+<td>₹{{"%.2f"|format(p.price or 0)}}</td>
+<td>{{p.stock}}</td>
+<td><span class="badge {{'bg-success' if p.status=='ACTIVE' else 'bg-secondary'}}">{{p.status}}</span></td>
+<td class="product-actions">
+  <form class="d-inline" method="post" action="{{url_for('admin_product_status',product_id=p.id, filter=product_status, brand=selected_brand)}}">
+    <input type="hidden" name="status" value="ACTIVE"><button class="btn btn-sm {{ 'btn-success' if p.status=='ACTIVE' else 'btn-outline-success' }}" {% if p.status=='ACTIVE' %}disabled{% endif %}>Active</button>
+  </form>
+  <form class="d-inline" method="post" action="{{url_for('admin_product_status',product_id=p.id, filter=product_status, brand=selected_brand)}}">
+    <input type="hidden" name="status" value="INACTIVE"><button class="btn btn-sm {{ 'btn-secondary' if p.status=='INACTIVE' else 'btn-outline-secondary' }}" {% if p.status=='INACTIVE' %}disabled{% endif %}>Inactive</button>
+  </form>
+  <a class="btn btn-sm btn-outline-primary" href="{{url_for('admin_product_edit',product_id=p.id)}}">Edit</a>
+  <form class="d-inline" method="post" action="{{url_for('admin_product_delete',product_id=p.id)}}" onsubmit="return confirm('Delete this product?')"><button class="btn btn-sm btn-outline-danger">Delete</button></form>
+</td>
+</tr>
+{% else %}
+<tr><td colspan="9" class="text-center text-muted py-4">No products found.</td></tr>
+{% endfor %}
+</tbody></table></div>
+
+<style>
+.brand-box{height:120px;background:#fff;border:1px solid #dfe6ee;border-radius:14px;padding:18px;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;box-shadow:0 3px 12px rgba(20,40,60,.05);transition:.15s}
+.brand-box:hover{transform:translateY(-2px);border-color:#1d72f2}.brand-box-active{border:2px solid #1d72f2;background:#f2f7ff}.brand-box-icon{font-size:24px;margin-bottom:4px}
+</style>
+{% endblock %}

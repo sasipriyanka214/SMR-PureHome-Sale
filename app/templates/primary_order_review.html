@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Review Order{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <div class="sticky-top bg-white border-bottom py-3 mb-4" style="z-index:30;top:0">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <div><span class="text-muted small">PRIMARY ORDER</span><h2 class="mb-0">Review Order</h2><div class="small text-muted">{{draft.dealer_name}} · {{draft.town}}</div></div>
+      <div class="d-flex gap-2">
+        <form method="post"><button name="action" value="edit" class="btn btn-outline-primary">← EDIT</button></form>
+        <form method="post" onsubmit="return confirm('Reject and clear this order selection?');"><button name="action" value="reject" class="btn btn-outline-danger">REJECT</button></form>
+        <form method="post" onsubmit="return confirm('Place this order?');"><button name="action" value="confirm" class="btn btn-success">PLACE ORDER</button></form>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel mb-4 border rounded overflow-hidden">
+    <div class="p-3 bg-primary text-white">
+      <h4 class="mb-1">Selected Products</h4>
+      <div class="small">Dealer: {{draft.dealer_name}} · SAP: {{draft.sap_code}} · Town: {{draft.town}}</div>
+    </div>
+    <div class="table-responsive">
+      <table class="table align-middle mb-0">
+        <thead><tr><th>S.No.</th><th>Product</th><th>Brand</th><th>Category</th><th>MRP</th><th>Rate</th><th>Qty (Pieces)</th><th>Scheme</th><th>Discount</th><th>Net Price</th><th>Total</th></tr></thead>
+        <tbody>
+        {% for i in draft["items"] %}
+          <tr>
+            <td>{{loop.index}}</td><td><b>{{i.product_name}}</b><div class="small text-muted">{{i.product_code}}</div></td>
+            <td>{{i.brand}}</td><td>{{i.category}}</td><td>₹{{'%.2f'|format(i.mrp)}}</td><td>₹{{'%.2f'|format(i.rate)}}</td>
+            <td><span class="badge bg-secondary">{{i.quantity}}</span></td>
+            <td>{% if i.scheme %}<b class="text-success">{{i.scheme}}%</b>{% else %}—{% endif %}</td>
+            <td>₹{{'%.2f'|format(i.discount_amount*i.quantity)}}</td><td>₹{{'%.2f'|format(i.net_price)}}</td><td><b>₹{{'%.2f'|format(i.total_price)}}</b></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-4">
+    <div class="col-md-8">
+      <div class="panel border rounded p-3 h-100">
+        <h5>Order Summary</h5>
+        <div class="d-flex justify-content-between py-2"><span>Final Product Value</span><b>₹{{'%.2f'|format(summary.net_total)}}</b></div>
+        <div class="d-flex justify-content-between py-2"><span>Overall Scheme / Discount</span><b>− ₹{{'%.2f'|format(summary.total_scheme)}}</b></div>
+        <div class="d-flex justify-content-between py-2"><span>Total Quantity</span><b>{{summary.total_qty}} pieces</b></div>
+        <div class="d-flex justify-content-between py-2"><span>GST ({{summary.gst_rate}}%)</span><b>₹{{'%.2f'|format(summary.gst)}}</b></div>
+        <hr>
+        <div class="d-flex justify-content-between fs-5"><span>Final Total</span><b class="text-success">₹{{'%.2f'|format(summary.final_total)}}</b></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="d-flex justify-content-end gap-2"><a class="btn btn-outline-success" href="{{url_for('primary_order_review_excel')}}">⬇ Excel</a><a class="btn btn-outline-danger" href="{{url_for('primary_order_review_pdf')}}">⬇ PDF</a></div>
+</div>
+{% endblock %}

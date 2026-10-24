@@ -1,0 +1,11 @@
+{% extends "base.html" %}{% block title %}Register{% endblock %}
+{% block content %}<div class="auth-wrap"><div class="auth-card">
+<div class="auth-icon">📝</div><h2>Create Account</h2><p class="text-muted">Register as a user</p>
+<form method="post">
+<label>Full Name</label><input class="form-control mb-3" name="name" required>
+<label>Email</label><input class="form-control mb-3" type="email" name="email" required>
+<label>Password</label><input class="form-control mb-3" type="password" name="password" minlength="8" required>
+<label>Confirm Password</label><input class="form-control mb-3" type="password" name="confirm_password" minlength="8" required>
+<button class="btn btn-success w-100">Create Account</button>
+</form><p class="text-center mt-3">Already registered? <a href="{{url_for('login')}}">Login</a></p>
+</div></div>{% endblock %}

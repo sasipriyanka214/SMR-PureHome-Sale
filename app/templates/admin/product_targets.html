@@ -1,0 +1,74 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Product Targets{% endblock %}
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+  <div>
+    <h2 class="mb-1">Product Targets</h2>
+    <p class="text-muted mb-0">Set the monthly product target in pieces. The target is visible to Admin and all Users.</p>
+  </div>
+</div>
+
+<form method="get" class="panel mb-4">
+  <div class="row g-3 align-items-end">
+    <div class="col-md-5">
+      <label class="form-label fw-semibold">Month</label>
+      <select name="month" class="form-select">
+        {% for m in range(1,13) %}
+        <option value="{{m}}" {% if m == month %}selected{% endif %}>{{ ['January','February','March','April','May','June','July','August','September','October','November','December'][m-1] }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label fw-semibold">Year</label>
+      <input type="number" name="year" class="form-control" value="{{year}}" min="2020" max="2100">
+    </div>
+    <div class="col-md-3">
+      <button class="btn btn-outline-primary w-100" type="submit">Load Month</button>
+    </div>
+  </div>
+</form>
+
+<form method="post">
+  <input type="hidden" name="month" value="{{month}}">
+  <input type="hidden" name="year" value="{{year}}">
+  <div class="panel mb-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h5 class="mb-0">{{ ['January','February','March','April','May','June','July','August','September','October','November','December'][month-1] }} {{year}} Target</h5>
+      <strong>Total: {{ "{:,}".format(total_target) }} Pieces</strong>
+    </div>
+    <div class="table-responsive">
+      <table class="table align-middle mb-0">
+        <thead><tr><th>Category</th><th style="width:220px">Target Pieces</th><th style="width:110px">Remove</th></tr></thead>
+        <tbody>
+        {% for row in rows %}
+        <tr>
+          <td><input type="text" name="category" class="form-control" value="{{row.category}}" readonly></td>
+          <td><input type="number" name="target_pieces" class="form-control" value="{{row.target_pieces}}" min="0" step="1" required></td>
+          <td class="text-center"><input type="checkbox" name="delete_category" value="{{row.category}}" title="Remove this category"></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="3" class="text-muted text-center py-4">No targets for this month yet.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel mb-4">
+    <h5>Add Product Category</h5>
+    <div class="row g-3 align-items-end">
+      <div class="col-md-7">
+        <label class="form-label">Category</label>
+        <input type="text" name="new_category" class="form-control" placeholder="Example: ENVY DEO">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Target Pieces</label>
+        <input type="number" name="new_target_pieces" class="form-control" min="0" step="1" placeholder="0">
+      </div>
+      <div class="col-md-2"><small class="text-muted">Leave blank if not adding.</small></div>
+    </div>
+  </div>
+
+  <button type="submit" class="btn btn-primary px-4">Save Product Targets</button>
+</form>
+{% endblock %}

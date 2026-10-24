@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}SMR · Home{% endblock %}
+{% block content %}
+<div class="approved-home">
+  <section class="approved-hero">
+    <div class="approved-hero-copy">
+      <div class="approved-kicker">PRODUCT · SALES · REPORTING</div>
+      <h1>Smart Product &amp;<br><span>Sales Management</span></h1>
+      <p>Manage products, customer orders, stock and monthly cumulative sales from one simple system.</p>
+    </div>
+    <div class="approved-hero-product"></div>
+  </section>
+
+  <section class="approved-summary">
+    <div class="approved-period">
+      <div class="approved-icon gold">▣</div>
+      <div><small>Current Month</small><strong>{{ metrics.month_label }}</strong></div>
+      <div class="approved-year"><small>Year</small><strong>{{ metrics.year_value }}</strong></div>
+    </div>
+
+    <section class="product-target-panel">
+      <div class="product-target-heading">
+        <div>
+          <h2>Monthly Product Target</h2>
+          <p>{{ metrics.month_label }} · Admin-defined target · Pieces</p>
+        </div>
+        <div class="product-target-total">{{ "{:,}".format(product_target_total) }} Pieces</div>
+      </div>
+      {% if product_targets %}
+      <div class="table-responsive">
+        <table class="table product-target-table align-middle mb-0">
+          <thead>
+            <tr><th>Category</th><th>Target</th><th>Achieved</th><th>Remaining</th><th>Achieved %</th><th>Req. per Day</th></tr>
+          </thead>
+          <tbody>
+          {% for row in product_targets %}
+            <tr>
+              <td><strong>{{ row.category }}</strong></td>
+              <td>{{ "{:,}".format(row.target) }}</td>
+              <td class="target-achieved">{{ "{:,}".format(row.achieved) }}</td>
+              <td class="target-remaining">{{ "{:,}".format(row.remaining) }}</td>
+              <td>{{ "%.1f"|format(row.achieved_pct) }}%</td>
+              <td>{{ "%.1f"|format(row.req_per_day) }}</td>
+            </tr>
+          {% endfor %}
+            <tr class="target-total-row">
+              <td><strong>Total</strong></td>
+              <td><strong>{{ "{:,}".format(product_target_total) }}</strong></td>
+              <td><strong>{{ "{:,}".format(product_achieved_total) }}</strong></td>
+              <td><strong>{{ "{:,}".format(product_remaining_total) }}</strong></td>
+              <td><strong>{{ "%.1f"|format(product_target_percent) }}%</strong></td>
+              <td><strong>{{ "%.1f"|format(product_req_per_day_total) }}</strong></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="product-target-empty">No product target has been set for this month.</div>
+      {% endif %}
+    </section>
+
+    <section class="product-target-panel pjp-home-panel">
+      <div class="product-target-heading"><div><h2>Monthly PJP Target</h2><p>{{ metrics.month_label }} · Current logged-in User/TSI</p></div><div class="product-target-total">PJP Planned: {{ pjp_progress.planned_visits }}</div></div>
+      <div class="table-responsive"><table class="table product-target-table align-middle mb-0"><thead><tr><th>Metric</th><th>Target</th><th>Achieved</th><th>Remaining</th></tr></thead><tbody>
+      <tr><td><strong>Primary Sales</strong></td><td>₹ {{'{:,.0f}'.format(pjp_progress.primary_target)}}</td><td class="target-achieved">₹ {{'{:,.0f}'.format(pjp_progress.primary_achieved)}}</td><td class="target-remaining">₹ {{'{:,.0f}'.format(pjp_progress.primary_remaining)}}</td></tr>
+      <tr><td><strong>Secondary Sales</strong></td><td>₹ {{'{:,.0f}'.format(pjp_progress.secondary_target)}}</td><td class="target-achieved">₹ {{'{:,.0f}'.format(pjp_progress.secondary_achieved)}}</td><td class="target-remaining">₹ {{'{:,.0f}'.format(pjp_progress.secondary_remaining)}}</td></tr>
+      <tr><td><strong>Outlet Visits</strong></td><td>{{'{:,}'.format(pjp_progress.outlet_target)}}</td><td class="target-achieved">{{'{:,}'.format(pjp_progress.outlet_achieved)}}</td><td class="target-remaining">{{'{:,}'.format(pjp_progress.outlet_remaining)}}</td></tr>
+      </tbody></table></div>
+    </section>
+
+    <div class="approved-grid">
+      <div class="approved-card">
+        <div class="approved-icon blue">▥</div>
+        <div class="approved-card-body"><h2>Monthly Sales</h2><div class="approved-values">
+          <div><small>Target</small><strong>₹ {{ "{:,.0f}".format(metrics.target) }}</strong></div>
+          <div><small>Achievement</small><strong class="green">₹ {{ "{:,.0f}".format(metrics.achievement) }}</strong></div>
+          <div><small>Remaining</small><strong class="red">₹ {{ "{:,.0f}".format(metrics.remaining) }}</strong></div>
+        </div></div>
+      </div>
+      <div class="approved-card">
+        <div class="approved-icon purple">••</div>
+        <div class="approved-card-body"><h2>DBR</h2><div class="approved-values">
+          <div><small>Total Mapped</small><strong class="blue-text">{{ metrics.dbr_total }}</strong></div>
+          <div><small>Achievement</small><strong class="green">{{ metrics.dbr_achievement }}</strong></div>
+          <div><small>Remaining</small><strong class="red">{{ metrics.dbr_remaining }}</strong></div>
+        </div></div>
+      </div>
+    </div>
+
+    <div class="approved-card approved-excel">
+      <div class="approved-icon green-icon">▤</div>
+      <div class="approved-card-body">
+        <h2>Excel Reports</h2>
+        <p>Download quarterly or monthly sales reports.</p>
+        <div class="approved-report-columns">
+          <div class="approved-report-block">
+            <h3>Quarterly Sales</h3>
+            <form method="get" action="{{ url_for('homepage_quarterly_report') }}" class="approved-report-form">
+              <label for="home-quarter">Quarter</label>
+              <select id="home-quarter" name="quarter">
+                <option value="1" {% if ((metrics.month_value-1)//3 + 1)==1 %}selected{% endif %}>Q1 - Jan - Mar</option>
+                <option value="2" {% if ((metrics.month_value-1)//3 + 1)==2 %}selected{% endif %}>Q2 - Apr - Jun</option>
+                <option value="3" {% if ((metrics.month_value-1)//3 + 1)==3 %}selected{% endif %}>Q3 - Jul - Sep</option>
+                <option value="4" {% if ((metrics.month_value-1)//3 + 1)==4 %}selected{% endif %}>Q4 - Oct - Dec</option>
+              </select>
+              <input type="hidden" name="year" value="{{ metrics.year_value }}">
+              <button type="submit">↓ Download Excel</button>
+            </form>
+          </div>
+          <div class="approved-report-block">
+            <h3>Monthly Report</h3>
+            <form method="get" action="{{ url_for('homepage_monthly_report') }}" class="approved-report-form">
+              <label for="home-month">Month</label>
+              <select id="home-month" name="month">
+                {% for m in range(1,13) %}
+                <option value="{{ m }}" {% if metrics.month_value==m %}selected{% endif %}>{{ ['January','February','March','April','May','June','July','August','September','October','November','December'][m-1] }}</option>
+                {% endfor %}
+              </select>
+              <label for="home-year">Year</label>
+              <select id="home-year" name="year">
+                {% for y in range(metrics.year_value-5, metrics.year_value+3) %}
+                <option value="{{ y }}" {% if metrics.year_value==y %}selected{% endif %}>{{ y }}</option>
+                {% endfor %}
+              </select>
+              <button type="submit">↓ Download Excel</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+<style>
+.product-target-panel{background:rgba(255,255,255,.96);border:1px solid #e7ddcc;border-radius:20px;box-shadow:0 7px 24px rgba(50,38,17,.06);padding:20px 24px;margin-bottom:14px}.product-target-heading{display:flex;justify-content:space-between;align-items:center;gap:18px;margin-bottom:14px}.product-target-heading h2{margin:0;color:#102b43;font-size:1.18rem}.product-target-heading p{margin:4px 0 0;color:#6e7882;font-size:.86rem}.product-target-total{font-weight:800;color:#17324a;white-space:nowrap}.product-target-table th{font-size:.78rem;color:#6e7882;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}.product-target-table td{color:#17324a}.product-target-table tbody tr:hover{background:#faf7ef}.target-achieved{color:#16965b!important;font-weight:700}.target-remaining{color:#e21d25!important;font-weight:700}.target-total-row{background:#f8f3e8}.product-target-empty{padding:18px;text-align:center;color:#6e7882;background:#faf8f2;border-radius:12px}@media(max-width:760px){.product-target-panel{padding:16px}.product-target-heading{align-items:flex-start;flex-direction:column}.product-target-table{min-width:760px}}
+</style>
+{% endblock %}

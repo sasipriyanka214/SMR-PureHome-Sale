@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="admin-layout">
+<aside class="admin-sidebar">
+<h4>SMR ADMIN</h4>
+<a href="{{url_for('admin_dashboard')}}">📊 Dashboard</a>
+<a href="{{url_for('admin_products')}}">📦 Products</a>
+<a href="{{url_for('admin_categories')}}">🏷️ Categories</a>
+<a href="{{url_for('admin_dealers')}}">👥 Dealer Mapping</a>
+<a href="{{url_for('admin_product_targets')}}">🎯 Product Targets</a>
+<a href="{{url_for('admin_pjp_management')}}">🗓️ PJP Management</a>
+<a href="{{url_for('admin_beat_names')}}">🧭 Beat Names</a>
+<a href="{{url_for('admin_users')}}">👥 Users</a>
+<a href="{{url_for('admin_orders')}}">🛒 Orders</a>
+<a href="{{url_for('admin_sales')}}">📈 Sales</a>
+<a href="{{url_for('admin_reports')}}">📊 Reports</a>
+<a href="{{url_for('inventory')}}">📦 Inventory</a>
+<a href="{{url_for('scheme_adjustment')}}">🎁 Scheme Adjustment</a>
+<a href="{{url_for('admin_import')}}">📥 Import Excel</a>
+<a href="{{url_for('logout')}}">🚪 Logout</a>
+</aside>
+<main class="admin-main">{% block admin_content %}{% endblock %}</main>
+</div>
+{% endblock %}

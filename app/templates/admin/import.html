@@ -1,0 +1,5 @@
+{% extends "admin/base_admin.html" %}{% block title %}Import Excel{% endblock %}
+{% block admin_content %}<h2>Import Excel Data</h2><p class="text-muted">Upload an .xlsx file, preview it, then explicitly confirm import.</p>
+<div class="panel mb-4"><form method="post" enctype="multipart/form-data"><input class="form-control mb-3" type="file" name="file" accept=".xlsx" required><button class="btn btn-primary">Upload & Preview</button></form></div>
+{% if preview %}<div class="panel"><h5>Preview</h5><div class="table-responsive"><table class="table table-sm"><thead><tr>{% for h in headers[:12] %}<th>{{h}}</th>{% endfor %}</tr></thead><tbody>{% for row in preview %}<tr>{% for v in row[:12] %}<td>{{v}}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div><form method="post" action="{{url_for('admin_import_confirm')}}"><button class="btn btn-success">Confirm Import Products</button></form></div>{% endif %}
+{% endblock %}

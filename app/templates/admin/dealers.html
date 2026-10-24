@@ -1,0 +1,12 @@
+{% extends "admin/base_admin.html" %}{% block title %}Dealer Mapping{% endblock %}{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3"><div><h2>Dealer Mapping</h2><p class="text-muted mb-0">Map dealers to users and add new dealers without changing existing mappings.</p></div></div>
+<div class="panel mb-4"><div class="d-flex justify-content-between align-items-center"><h5 class="mb-0">+ Add New Dealer</h5><span class="badge bg-primary">Admin Only</span></div><form method="post" class="row g-3 mt-1"><input type="hidden" name="action" value="add_dealer">
+<div class="col-md-4"><label class="form-label">Dealer Name</label><input class="form-control" name="dealer_name" required></div>
+<div class="col-md-4"><label class="form-label">SAP Code</label><input class="form-control" name="sap_code" required></div>
+<div class="col-md-4"><label class="form-label">Town</label><input class="form-control" name="town" required></div>
+<div class="col-md-5"><label class="form-label">Employee / User</label><select name="emp_name" class="form-select"><option value="">Unassigned</option>{% for u in user_options %}<option value="{{u.name}}">{{u.name}}</option>{% endfor %}</select></div>
+<div class="col-md-4"><label class="form-label">Employee Code</label><input class="form-control" name="emp_code"></div>
+<div class="col-md-3 d-flex align-items-end"><button class="btn btn-success w-100">Add Dealer</button></div></form></div>
+<div class="panel table-responsive"><table class="table align-middle"><thead><tr><th>Dealer</th><th>SAP Code</th><th>Town</th><th>Emp/User</th><th>Emp Code</th><th>Change</th></tr></thead><tbody>
+{% for d in dealers %}<tr><form method="post"><td>{{d.dealer_name}}<input type="hidden" name="dealer_id" value="{{d.id}}"></td><td>{{d.sap_code}}</td><td>{{d.town}}</td><td><select name="emp_name" class="form-select form-select-sm"><option value="">Unassigned</option>{% for u in user_options %}<option value="{{u.name}}" {% if u.name==d.emp_name %}selected{% endif %}>{{u.name}}</option>{% endfor %}</select></td><td><input class="form-control form-control-sm" name="emp_code" value="{{d.emp_code}}"></td><td><button class="btn btn-sm btn-success">Save</button></td></form></tr>{% else %}<tr><td colspan="6" class="text-center py-4">No dealers found.</td></tr>{% endfor %}
+</tbody></table></div>{% endblock %}

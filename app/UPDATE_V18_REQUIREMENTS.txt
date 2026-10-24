@@ -1,0 +1,8 @@
+SMR PureHome V18 update
+- User Products keeps multi-brand selections in one order and supports fresh dealer selection from the top-bar Products link.
+- Admin Products now has brand boxes plus global Active/Inactive/All filters; MRP/status edits persist.
+- Orders review simplified; final product value, scheme/discount, quantity, GST 18%, and final total are shown. Total Cases removed.
+- Primary order total saved includes 18% GST.
+- PostgreSQL timestamp/date filters use explicit date casts.
+- Beat mappings are globally exclusive while active; Admin must remove a mapping before assigning the same beat to another user.
+- PJP monthly progress uses PostgreSQL-safe order dates.

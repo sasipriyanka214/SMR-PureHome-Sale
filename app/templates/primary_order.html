@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% block title %}Orders{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <div class="panel mb-4">
+    <h3>Orders</h3>
+    <p class="text-muted">Select Dealer → SET → choose products → Order Page.</p>
+    <form method="get" class="row g-3 align-items-end">
+      <div class="col-md-5">
+        <label class="form-label">Dealer</label>
+        <select class="form-select" name="dealer_id" id="dealerSelect" required>
+          <option value="">Select Dealer</option>
+          {% for d in dealers %}
+          <option value="{{d.id}}" data-town="{{d.town}}" {% if selected_dealer and selected_dealer.id==d.id %}selected{% endif %}>{{d.dealer_name}}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Town</label>
+        <input class="form-control" id="townName" value="{{selected_dealer.town if selected_dealer else ''}}" readonly>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label">Order</label>
+        <select class="form-select" name="order_type">
+          <option>PRIMARY ORDER</option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <button class="btn btn-success w-100">SET</button>
+      </div>
+    </form>
+    {% if selected_dealer %}
+    <div class="dealer-meta mt-3">
+      <b>Dealer:</b> {{selected_dealer.dealer_name}} &nbsp; | &nbsp;
+      <b>SAP Code:</b> {{selected_dealer.sap_code}} &nbsp; | &nbsp;
+      <b>Town:</b> {{selected_dealer.town}} &nbsp; | &nbsp;
+      <b>User:</b> {{selected_dealer.emp_name}} &nbsp; | &nbsp;
+      <b>Emp Code:</b> {{selected_dealer.emp_code}}
+    </div>
+    {% endif %}
+  </div>
+
+  {% if selected_dealer %}
+  <div class="panel">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <div><h4 class="mb-1">Order Products</h4><div class="small text-muted">Quantity rules are product/category based: Room Freshener 126GM/220ML = 30, 60, 90...; Room Freshener Nector = 6, 12, 18...; Perfume/Pocket = 6, 12, 18...; other products = 12, 24, 36.... Scheme is automatic and Admin-controlled.</div></div>
+      <div class="fw-bold">Total: ₹<span id="grandTotal">0.00</span></div>
+    </div>
+    <form method="post" id="primaryForm">
+      <input type="hidden" name="dealer_id" value="{{selected_dealer.id}}">
+      <input type="hidden" name="order_type" value="PRIMARY ORDER">
+      <div class="table-responsive">
+        <table class="table align-middle primary-table">
+          <thead><tr><th>Select</th><th>Product</th><th>MRP</th><th>Scheme</th><th>Net Price</th><th>Quantity</th><th>Total Price</th></tr></thead>
+          <tbody>
+          {% for p in products %}
+          <tr>
+            <td><input class="form-check-input product-check" type="checkbox" name="selected_products" value="{{p.id}}"></td>
+            <td><b>{{p.name}}</b><div class="small text-muted">{{p.product_code}}</div></td>
+            <td><input class="form-control form-control-sm mrp-input" value="{{p.mrp or p.price or 0}}" type="number" step="0.01" min="0" readonly aria-readonly="true" title="MRP is fixed"></td>
+            <td>
+              {% if p.brand in ['ENVY', 'Pure Home'] %}
+              <input class="form-control form-control-sm scheme-input" name="scheme_{{p.id}}" value="{{p.trade_promotion or 0}}" data-trade="{{p.trade_promotion or 0}}" data-s1="{{p.slab1_percent or 0}}" data-q1="{{p.slab1_cs or 0}}" data-s2="{{p.slab2_percent or 0}}" data-q2="{{p.slab2_cs or 0}}" data-s3="{{p.slab3_percent or 0}}" data-q3="{{p.slab3_cs or 0}}" data-case-size="{{p.case_size or 0}}" type="number" readonly tabindex="-1" aria-readonly="true" title="Automatic from quantity; Admin controls scheme rules">
+              <div class="small text-muted scheme-label">Trade Promotion</div>
+              <div class="small text-muted cs-label">0 CS</div>
+              {% else %}
+              <div class="input-group input-group-sm"><input class="form-control scheme-input" name="scheme_{{p.id}}" value="0" type="number" step="0.01" min="0" max="100"><span class="input-group-text">%</span></div>
+              {% endif %}
+            </td>
+            <td><input class="form-control form-control-sm net-input" name="net_price_{{p.id}}" value="{{p.price or p.mrp or 0}}" type="number" step="0.01" min="0" readonly aria-readonly="true" title="Calculated from Rate and Scheme"></td>
+            <td>
+              <div class="input-group input-group-sm quantity-control">
+                <button class="btn btn-outline-secondary qty-minus" type="button" disabled>−</button>
+                <input class="form-control form-control-sm qty-input text-center" name="quantity_{{p.id}}" value="{{p.qty_min}}" type="number" min="{{p.qty_min}}" step="{{p.qty_step}}" disabled>
+                <button class="btn btn-outline-primary qty-plus" type="button" disabled>+{{ 6 if p.category in ['Perfume', 'Pocket'] else 12 }}</button>
+              </div>
+              <div class="small text-muted">+{{p.qty_step}} only</div>
+            </td>
+            <td class="line-total">₹0.00</td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <button class="btn btn-success px-5" type="submit">Create Order</button>
+    </form>
+  </div>
+  {% endif %}
+
+  <div class="panel mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h4 class="mb-0">Order History</h4>
+      {% if is_admin %}
+      <div class="d-flex gap-2">
+        <a class="btn btn-outline-danger btn-sm" href="{{url_for('admin_primary_orders_pdf')}}">PDF</a>
+        <a class="btn btn-outline-success btn-sm" href="{{url_for('admin_primary_orders_excel')}}">Excel</a>
+      </div>
+      {% endif %}
+    </div>
+    {% if is_admin %}
+    <div class="table-responsive"><table class="table align-middle">
+      <thead><tr><th>Dealer</th><th>Town</th><th>Items</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody>
+      {% for o in orders %}
+      <tr>
+        <td><b>{{o.dealer_name}}</b></td>
+        <td>{{o.town}}</td>
+        <td><span class="badge bg-secondary">{{o.item_count}}</span></td>
+        <td><span class="badge {% if o.status=='CONFIRMED' %}bg-success{% elif o.status=='REJECTED' %}bg-danger{% else %}bg-warning text-dark{% endif %}">{{o.status}}</span></td>
+        <td>
+          <div class="d-flex flex-wrap gap-1">
+            <a class="btn btn-sm btn-outline-primary" href="{{url_for('admin_primary_order_edit', order_id=o.latest_order_id)}}">Edit</a>
+            <form method="post" action="{{url_for('admin_primary_order_group_status')}}" class="d-inline">
+              <input type="hidden" name="order_ids" value="{{o.order_ids}}">
+              <input type="hidden" name="status" value="CONFIRMED">
+              <button class="btn btn-sm btn-success" type="submit" {% if o.status=='CONFIRMED' %}disabled{% endif %}>Confirm</button>
+            </form>
+            <form method="post" action="{{url_for('admin_primary_order_group_status')}}" class="d-inline">
+              <input type="hidden" name="order_ids" value="{{o.order_ids}}">
+              <input type="hidden" name="status" value="REJECTED">
+              <button class="btn btn-sm btn-danger" type="submit" {% if o.status=='REJECTED' %}disabled{% endif %}>Reject</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% else %}<tr><td colspan="5" class="text-center py-4">No orders.</td></tr>{% endfor %}
+      </tbody></table></div>
+    {% else %}
+    <div class="table-responsive"><table class="table"><thead><tr><th>Dealer</th><th>Town</th><th>Items</th><th>Status</th><th>Date</th></tr></thead>
+    <tbody>{% for o in orders %}<tr><td>{{o.dealer_name or '-'}}</td><td>{{o.town or '-'}}</td><td>{{o.item_count}}</td><td>{{o.status}}</td><td>{{o.created_at}}</td></tr>{% else %}<tr><td colspan="5">No orders.</td></tr>{% endfor %}</tbody></table></div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const dealerSelect=document.getElementById('dealerSelect');
+const townName=document.getElementById('townName');
+if(dealerSelect){dealerSelect.addEventListener('change',()=>{const o=dealerSelect.options[dealerSelect.selectedIndex];townName.value=o?.dataset.town||'';});}
+const checks=document.querySelectorAll('.product-check');
+function schemeFraction(value){let n=Number(value)||0; return n>1 ? n/100 : n;}
+function updateSchemeForRow(row){
+  const q=row.querySelector('.qty-input');
+  const scheme=row.querySelector('.scheme-input');
+  const label=row.querySelector('.scheme-label');
+  const csLabel=row.querySelector('.cs-label');
+  if(!q||!scheme||!scheme.dataset.s1)return;
+
+  const pieces=Number(q.value)||0;
+  const caseSize=Number(scheme.dataset.caseSize)||0;
+  const cs=caseSize>0 ? pieces/caseSize : pieces;
+  const slabs=[
+    [Number(scheme.dataset.q1)||0,Number(scheme.dataset.s1)||0],
+    [Number(scheme.dataset.q2)||0,Number(scheme.dataset.s2)||0],
+    [Number(scheme.dataset.q3)||0,Number(scheme.dataset.s3)||0]
+  ].filter(x=>x[0]>0&&x[1]>=0).sort((a,b)=>a[0]-b[0]);
+
+  let pct=Number(scheme.dataset.trade)||0;
+  let text=`Trade Promotion ${pct}%`;
+  slabs.forEach(([min,p])=>{
+    if(cs>=min){
+      pct=p;
+      text=`Scheme: ${p}% on ${min} CS`;
+    }
+  });
+  scheme.value=pct.toFixed(2).replace(/\.00$/,'');
+  if(label)label.textContent=text;
+  if(csLabel)csLabel.textContent=`${cs.toFixed(2).replace(/\.00$/,'')} CS (Case Size ${caseSize || '-'})`;
+}
+function updateTotals(){let grand=0;document.querySelectorAll('tbody tr').forEach(row=>{const c=row.querySelector('.product-check');const q=row.querySelector('.qty-input');const n=row.querySelector('.net-input');const scheme=row.querySelector('.scheme-input');const total=row.querySelector('.line-total');if(!c||!q||!n)return;updateSchemeForRow(row);const rate=Number(n.dataset.rate||n.value)||0;if(scheme){const f=schemeFraction(scheme.value);n.value=Math.max(0,rate-(rate*f)).toFixed(2);}if(c.checked){q.disabled=false;if(!q.value||Number(q.value)<Number(q.min||12))q.value=Number(q.min||12);updateSchemeForRow(row);const f=schemeFraction(scheme.value);n.value=Math.max(0,rate-(rate*f)).toFixed(2);const qty=Number(q.value);const net=Number(n.value)||0;const line=qty*net;total.textContent='₹'+line.toFixed(2);grand+=line;}else{q.disabled=true;total.textContent='₹0.00';}});const g=document.getElementById('grandTotal');if(g)g.textContent=grand.toFixed(2);}
+// Rate is fixed from the product price; scheme only changes the calculated net price.
+document.querySelectorAll('.net-input').forEach(i=>i.dataset.rate=i.value);
+checks.forEach(c=>c.addEventListener('change',()=>{
+  const row=c.closest('tr');
+  row?.querySelectorAll('.qty-input,.qty-plus,.qty-minus').forEach(el=>el.disabled=!c.checked);
+  updateTotals();
+}));
+document.querySelectorAll('.qty-input').forEach(i=>i.addEventListener('input',updateTotals));
+document.querySelectorAll('.qty-plus').forEach(btn=>btn.addEventListener('click',()=>{
+  const row=btn.closest('tr'), q=row?.querySelector('.qty-input');
+  if(!q) return;
+  const step=Number(q.step)||12; const min=Number(q.min)||step;
+  q.value=(Math.max(min,Number(q.value)||min)+step);
+  updateTotals();
+}));
+document.querySelectorAll('.qty-minus').forEach(btn=>btn.addEventListener('click',()=>{
+  const row=btn.closest('tr'), q=row?.querySelector('.qty-input');
+  if(!q) return;
+  const step=Number(q.step)||12; const min=Number(q.min)||step;
+  q.value=Math.max(min,(Number(q.value)||min)-step);
+  updateTotals();
+}));
+document.getElementById('primaryForm')?.addEventListener('submit',e=>{let ok=true;document.querySelectorAll('.product-check:checked').forEach(c=>{const row=c.closest('tr');const q=row.querySelector('.qty-input');const v=Number(q.value);const min=Number(q.min)||12;const step=Number(q.step)||12;if(v<min||((v-min)%step)!==0)ok=false;});if(!ok){e.preventDefault();alert('Please use the minimum quantity and +step shown for each selected product.');}});
+updateTotals();
+</script>
+{% endblock %}

@@ -1,0 +1,11 @@
+SMR PRIMARY ORDER - OVERALL SCHEME UPDATE
+
+1. ENVY scheme slabs are now applied from the actual Admin-maintained Scheme Adjustment table.
+2. Multiple SKUs/variants/flavors in the SAME scheme category are combined before selecting the slab.
+3. Example: ENVY Deo (All SKUs) with 1 CS + 2 CS = 3 CS uses the 2 CS slab (34%), not the 5 CS slab.
+4. Different ENVY scheme categories are calculated separately because the supplied scheme sheet is category-specific.
+5. Pure Home remains separate from ENVY and uses its own Admin Scheme Adjustment category rules.
+6. Scheme is applied to the product RATE, while MRP remains visible/locked from the product master.
+7. Primary Order review, confirmation, legacy Primary Order creation, and Admin Primary Order editing all recalculate from the combined quantity.
+8. Flavor selectors were removed from the Products and Product Details UI; users select the SKU/product directly.
+9. Existing Inventory, Movements, Games, Orders integration, dealer mapping and other project features are preserved from the supplied project.

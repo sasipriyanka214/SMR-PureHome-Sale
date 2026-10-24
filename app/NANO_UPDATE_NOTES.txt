@@ -1,0 +1,48 @@
+SMR NANO UPDATE
+
+Changes included:
+1. Electronics category is replaced by Nano.
+2. Nano products:
+   - Envy 1000 Deo Nano Beats
+   - Envy 1000 Deo Nano Blaze
+   - Envy 1000 Deo Nano Club
+3. Nano product master:
+   - GM/ML: 25 GM/30 ML
+   - MRP: 75
+   - Case Size: 144
+   - Rate: 51.99
+4. Primary Order:
+   - Nano quantity is 12, 24, 36, 48... only.
+   - +12 and -12 controls are added.
+   - User cannot edit Scheme.
+   - Scheme is calculated automatically from Admin Scheme Adjustment and quantity/case size.
+5. Nano uses the existing Admin ENVY scheme category:
+   Envy Deo Nano 25Gm/30ml
+   Trade Promotion: 30%
+   Slab 1: 33% on 1 CS
+   Slab 2: 34% on 2 CS
+   Slab 3: 35% on 3 CS
+   Since Nano case size is 144, these thresholds are:
+   144, 288 and 432 pieces.
+6. Existing Electronics products are migrated to Nano where possible so existing
+   product references are not unnecessarily broken.
+
+PURE HOME UPDATE
+
+Added a separate Pure Home brand alongside NV.
+Pure Home scheme categories from the supplied paper:
+1. Room Freshener 126GM/220ML — 40%; 44% on 5 CS; 46% on 10 CS; 47% on 25 CS
+2. Room Freshener 250ML — 40%; 45% on 1 CS; 47% on 2 CS; 50% on 3 CS
+3. Pour Home Room Freshener (Nector) — 33%; 35% on 3 CS; 36% on 5 CS; 37% on 10 CS
+4. Pour Home Room Freshener (Nector DRIVE) — 43%; 50% on 1 CS
+5. Pour Home Air Freshner Blocks (4 in 1 Pack) — 33%
+6. Pour Home NEO Gel — 33%
+7. Pour Home 70gm Gel (Fusion, Flora, Rose, Lime) — 33%
+8. Pour Home 70 gm Gel (Safari & Dusk) — 50%
+9. Pour Home Dry Pods 45 gm — 35%
+
+Representative product master values (case size/MRP/rate) are taken from the supplied SMR SALF.xlsx where available, so Pure Home quantity-to-CS scheme calculation works instead of treating pieces as CS.
+
+Products page now has NV and Pure Home brand tabs. Selecting a brand shows its products, subcategories and scheme details.
+Admin Scheme Adjustment now has NV / Pure Home tabs and only Admin can edit scheme values.
+Primary Order automatically reads the Admin-maintained scheme for both brands; users cannot edit scheme.

@@ -1,0 +1,163 @@
+{% extends "base.html" %}{% block title %}Products{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+    <div><h2>Products</h2><p class="text-muted mb-0">Select dealer, choose products and continue to the Order Page.</p></div>
+  </div>
+
+  <form class="row g-2 mb-4">
+    <input type="hidden" name="brand" value="{{brand}}">
+    <div class="col-md-8"><input class="form-control" name="q" value="{{q}}" placeholder="Search by product, code, category or brand"></div>
+    <div class="col-md-2"><button class="btn btn-primary w-100">Search</button></div>
+    <div class="col-md-2"><a class="btn btn-outline-secondary w-100" href="{{url_for('products')}}">Clear</a></div>
+  </form>
+
+  {% if logged_user %}
+  <form method="post" action="{{url_for('primary_order_from_products')}}" id="productOrderForm">
+    <input type="hidden" name="brand" value="{{brand}}">
+    <div class="panel mb-4 p-3 border rounded bg-light">
+      <div class="row g-3 align-items-end">
+        <div class="col-md-6">
+          <label class="form-label fw-bold">Dealer for Primary Order</label>
+          <select class="form-select" name="dealer_id" id="orderDealer" required>
+            <option value="">Select Dealer</option>
+            {% for d in dealers %}<option value="{{d.id}}" {% if selected_dealer_id==d.id|string %}selected{% endif %}>{{d.dealer_name}} — {{d.town}}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3"><button type="button" class="btn btn-primary w-100" id="setDealerBtn">SET</button></div>
+        <div class="col-md-3 text-md-end"><span class="badge text-bg-primary fs-6" id="selectedCount">{{ (selection_state.items|length) if selection_state and selection_state.items else 0 }} selected</span> <span class="badge text-bg-success fs-6">₹<span id="selectionTotal">0.00</span></span></div>
+      </div>
+    </div><div id="dealerSetMessage" class="alert alert-success py-2 d-none mb-0">Dealer set.</div>
+  {% endif %}
+
+  <div class="category-tabs mb-4">
+    {% for b in brands %}<a class="category-tab {% if brand==b.brand %}active{% endif %}" href="{{url_for('products', brand=b.brand)}}"><span class="category-tab-icon">📦</span><span>{{b.brand}}</span></a>{% endfor %}
+  </div>
+
+  {% if brand %}
+  <section class="category-section">
+    <div class="category-heading-row"><div><span class="category-kicker">BRAND</span><h2>{{brand}}</h2>
+      {% if brand_categories.get(brand) %}<div class="d-flex flex-wrap gap-2">{% for c in brand_categories[brand] %}<a class="badge rounded-pill text-bg-light text-decoration-none" href="{{url_for('products',brand=brand,category=c.category)}}">{{c.category}}</a>{% endfor %}</div>{% endif %}
+    </div><span class="variant-count">{{products|length}} products</span></div>
+
+    {% if brand in ['ENVY', 'Pure Home'] %}
+      {% for mrp, group in brand_groups.items() %}
+      <div class="panel mb-4 border rounded overflow-hidden">
+        <div class="p-3 bg-primary text-white d-flex justify-content-between"><h5 class="mb-0">MRP ₹{{'%.2f'|format(mrp)}}</h5><span>{{group|length}} products</span></div>
+        <div class="row g-3 p-3">
+        {% for p in group %}
+          {% set saved=selected_map.get(p.id|string,{}) %}
+          <div class="col-lg-4 col-md-6"><article class="product-card h-100 border rounded p-3">
+            <div class="d-flex justify-content-between"><div><small>{{p.product_code}}</small><h5>{{p.name}}</h5></div><div class="text-primary fw-bold">₹{{'%.2f'|format(p.mrp or p.price or 0)}}</div></div>
+            <div class="small text-muted mb-2">{{p.category or '-'}} {% if p.gm_ml %}· {{p.gm_ml}}{% endif %} · Case {{p.case_size or '-'}} </div>
+            {% if logged_user %}<div class="form-check mt-3"><input class="form-check-input product-check" type="checkbox" name="selected_product_ui" value="{{p.id}}" data-price="{{p.price or 0}}" {% if saved %}checked{% endif %}><label class="form-check-label">Select Product</label></div>
+            <div class="input-group input-group-sm mt-2"><button class="btn btn-outline-secondary qty-minus" type="button">−</button><input class="form-control text-center qty-input" name="quantity_{{p.id}}" value="{{saved.get('quantity',p.qty_min)}}" min="{{p.qty_min}}" step="{{p.qty_step}}" disabled><button class="btn btn-outline-primary qty-plus" type="button">+</button></div><div class="small text-muted">Minimum {{p.qty_min}} · step +{{p.qty_step}}</div>{% endif %}
+            <div class="small mt-2">Stock: <span class="badge bg-success">{{p.stock}}</span>{% if p.stock_new %} <span class="badge bg-warning text-dark">NEW PRODUCT</span>{% endif %}</div>
+          </article></div>
+        {% endfor %}</div>
+      </div>
+      {% endfor %}
+    {% else %}
+      {% for p in products %}
+      <div class="product-card mb-3 border rounded p-3"><div class="row align-items-center"><div class="col-md-5"><small>{{p.product_code}}</small><h5>{{p.name}}</h5><div class="small text-muted">{{p.category or '-'}} · MRP ₹{{'%.2f'|format(p.mrp or p.price or 0)}}</div></div><div class="col-md-4"><div class="small text-muted">Select the SKU directly. No flavor selection is required.</div></div>{% if logged_user %}<div class="col-md-3"><div class="form-check"><input class="form-check-input product-check" type="checkbox" name="selected_product_ui" value="{{p.id}}" data-price="{{p.price or 0}}"><label class="form-check-label">Select Product</label></div><input class="form-control form-control-sm qty-input mt-2" name="quantity_{{p.id}}" value="{{p.qty_min}}" min="{{p.qty_min}}" step="{{p.qty_step}}" disabled></div>{% endif %}</div></div>
+      {% endfor %}
+    {% endif %}
+  </section>
+  {% else %}<div class="category-empty-state"><h3>Select a brand</h3><p>Choose <b>ENVY</b> or another brand to view products.</p></div>{% endif %}
+
+  {% if logged_user %}
+    <div class="sticky-bottom bg-white border-top py-3 mt-4" style="position:sticky;bottom:0;z-index:20"><div class="d-flex justify-content-between align-items-center"><div><b id="stickyItems">0 products selected</b><div class="small text-muted">SET dealer → select products → continue to Order Page.</div></div><button class="btn btn-success btn-lg px-4" type="submit">ORDER PAGE →</button></div></div>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}<script>
+(function(){
+  const KEY='smr_primary_order_selection_v3';
+  const SERVER_STATE={{ selection_state|tojson }}; const RESET_SELECTION={{ fresh_reset|default(false)|tojson }};
+  const form=document.getElementById('productOrderForm'), dealer=document.getElementById('orderDealer');
+  if(!form)return;
+  let state=(SERVER_STATE && SERVER_STATE.items) ? SERVER_STATE : {dealer_id:'',items:{}};
+  if(RESET_SELECTION){
+    try{localStorage.removeItem(KEY);}catch(e){}
+    state={dealer_id:'',items:{}};
+  } else if(!Object.keys(state.items||{}).length){
+    try{const old=JSON.parse(localStorage.getItem(KEY)||'null');if(old&&old.items)state=old;}catch(e){}
+  }
+  if(!state.items)state.items={};
+  if(state.dealer_id && dealer)dealer.value=String(state.dealer_id);
+
+  async function persist(){
+    try{
+      localStorage.setItem(KEY,JSON.stringify(state));
+      const fd=new FormData();
+      if(state.dealer_id)fd.append('dealer_id',state.dealer_id);
+      Object.entries(state.items).forEach(([id,qty])=>{fd.append('selected_products',id);fd.append('quantity_'+id,String(qty));});
+      await fetch('{{url_for("products_save_selection")}}',{method:'POST',body:fd,credentials:'same-origin',keepalive:true});
+    }catch(e){}
+  }
+  function updateCurrentPageState(){
+    document.querySelectorAll('.product-check').forEach(c=>{
+      const id=String(c.value),q=c.closest('.product-card')?.querySelector('.qty-input');
+      if(c.checked) state.items[id]=Number(q?.value||q?.min||0);
+      else delete state.items[id];
+    });
+    if(dealer&&dealer.value)state.dealer_id=dealer.value;
+  }
+  function refreshSelection(){
+    let n=0,total=0;
+    document.querySelectorAll('.product-check').forEach(c=>{
+      const row=c.closest('.product-card'),q=row?.querySelector('.qty-input');
+      if(q)q.disabled=!c.checked;
+      if(c.checked){n++;total+=(Number(c.dataset.price)||0)*(Number(q?.value)||0);}
+    });
+    const count=Object.keys(state.items).length;
+    let a=document.getElementById('selectedCount'),b=document.getElementById('selectionTotal'),st=document.getElementById('stickyItems');
+    if(a)a.textContent=count+' selected';
+    if(b)b.textContent=total.toFixed(2);
+    if(st)st.textContent=count+' products selected across brands';
+  }
+  function restore(){
+    document.querySelectorAll('.product-check').forEach(c=>{
+      const id=String(c.value),q=c.closest('.product-card')?.querySelector('.qty-input');
+      if(Object.prototype.hasOwnProperty.call(state.items,id)){c.checked=true;if(q)q.value=state.items[id];}
+    });
+    refreshSelection();
+  }
+  document.querySelectorAll('.product-check').forEach(c=>c.addEventListener('change',async()=>{updateCurrentPageState();refreshSelection();await persist();}));
+  document.querySelectorAll('.qty-input').forEach(q=>q.addEventListener('input',async()=>{updateCurrentPageState();refreshSelection();await persist();}));
+  document.querySelectorAll('.qty-plus').forEach(b=>b.addEventListener('click',async()=>{
+    const q=b.closest('.product-card')?.querySelector('.qty-input');
+    if(q){q.value=Number(q.value||q.min)+Number(q.step||1);updateCurrentPageState();refreshSelection();await persist();}
+  }));
+  document.querySelectorAll('.qty-minus').forEach(b=>b.addEventListener('click',async()=>{
+    const q=b.closest('.product-card')?.querySelector('.qty-input');
+    if(q){q.value=Math.max(Number(q.min||1),Number(q.value||q.min)-Number(q.step||1));updateCurrentPageState();refreshSelection();await persist();}
+  }));
+  dealer?.addEventListener('change',async()=>{state.dealer_id=dealer.value;await persist();});
+  document.getElementById('setDealerBtn')?.addEventListener('click',async()=>{
+    if(!dealer?.value){alert('Please select a Dealer first.');return;}
+    state.dealer_id=dealer.value;await persist();
+    const opt=dealer.options[dealer.selectedIndex],box=document.getElementById('dealerSetMessage');
+    if(box){box.textContent='Dealer set: '+opt.text;box.classList.remove('d-none');}
+  });
+  form.addEventListener('submit',async e=>{
+    e.preventDefault();
+    updateCurrentPageState();
+    const dealerId=dealer?.value||state.dealer_id;
+    if(!dealerId){alert('Please select a Dealer first.');return;}
+    state.dealer_id=dealerId;
+    const ids=Object.keys(state.items);
+    if(!ids.length){alert('Please select at least one product.');return;}
+    await persist();
+    form.querySelectorAll('input[data-generated-selection]').forEach(x=>x.remove());
+    const add=(name,value)=>{const i=document.createElement('input');i.type='hidden';i.name=name;i.value=value;i.dataset.generatedSelection='1';form.appendChild(i);};
+    add('dealer_id',dealerId);
+    ids.forEach(id=>{add('selected_products',id);add('quantity_'+id,state.items[id]);});
+    form.querySelectorAll('.product-check,.qty-input').forEach(x=>x.removeAttribute('name'));
+    form.submit();
+  });
+  window.addEventListener('beforeunload',()=>{updateCurrentPageState();try{localStorage.setItem(KEY,JSON.stringify(state));}catch(e){}});
+  restore();
+})();
+</script>{% endblock %}

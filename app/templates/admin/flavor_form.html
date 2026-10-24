@@ -1,0 +1,16 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Edit Flavor{% endblock %}
+{% block admin_content %}
+<div class="panel form-panel">
+  <h2>Edit Flavor</h2>
+  <p class="text-muted">Category: <strong>{{ flavor.category_name }}</strong></p>
+  <form method="post">
+    <label>Flavor Name</label>
+    <input class="form-control mb-3" name="name" value="{{ flavor.name }}" required>
+    <label>Description</label>
+    <textarea class="form-control mb-3" name="description" rows="4">{{ flavor.description }}</textarea>
+    <button class="btn btn-success">Save Changes</button>
+    <a class="btn btn-outline-secondary" href="{{ url_for('admin_categories') }}">Cancel</a>
+  </form>
+</div>
+{% endblock %}

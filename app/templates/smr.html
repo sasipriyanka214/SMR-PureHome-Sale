@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block title %}SMR - Stock Summary{% endblock %}
+{% block content %}
+<style>
+.smr-page{background:#eef3f8;border-radius:18px;padding:18px 0 28px}
+.smr-head{display:flex;justify-content:space-between;align-items:center;gap:15px;margin-bottom:14px}
+.smr-title{font-size:30px;font-weight:800;color:#123b63;margin:0}.smr-sub{color:#64748b;margin:2px 0 0}
+.smr-card{background:#fff;border:1px solid #d8e2ec;border-radius:14px;box-shadow:0 4px 14px rgba(30,64,100,.07);height:100%}
+.smr-card-head{padding:11px 14px;border-bottom:1px solid #e1e8ef;font-weight:800;color:#163e63;background:linear-gradient(90deg,#f3f8fc,#fff);border-radius:14px 14px 0 0}
+.smr-card-body{padding:13px 14px}.smr-label{font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.03em}
+.smr-value{font-size:15px;color:#102a43}.smr-select,.smr-search{border:1px solid #b9ccdc;border-radius:9px;padding:10px 12px;width:100%;background:#fff}
+.smr-team{display:flex;gap:8px;flex-wrap:wrap}.team-pill{border:1px solid #c9d9e8;border-radius:10px;padding:8px 10px;background:#f7fbff;font-size:13px}
+.category-tabs{display:flex;gap:7px;flex-wrap:wrap;margin:14px 0}.category-tab{border:1px solid #c8d8e8;background:#fff;color:#244b6e;border-radius:20px;padding:7px 12px;font-size:13px;cursor:pointer}.category-tab.active{background:#1f5f91;color:#fff}
+.stock-section{margin-top:12px}.stock-head{display:flex;justify-content:space-between;align-items:center;padding:10px 13px;background:#eaf2fa;border:1px solid #c8d9e8;border-radius:12px 12px 0 0;color:#153f63;font-weight:800}.stock-head small{font-weight:600;color:#64748b}
+.smr-table{margin:0;background:#fff}.smr-table th{background:#1f5f91;color:#fff;white-space:nowrap;font-size:12px}.smr-table td{vertical-align:middle;font-size:13px}.smr-table .qty-input{width:90px;text-align:center;border:1px solid #c8d5e2;border-radius:7px;padding:6px}.smr-table .mrp{font-weight:700;color:#234f73}.smr-table .zero{color:#94a3b8}.cat-total td{background:#edf5fc;font-weight:800}
+.smr-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.btn-excel{background:#168a50;color:#fff;border:0}.btn-excel:hover{background:#117542;color:#fff}.btn-secondary-order{background:#1f5f91;color:#fff;border:0}.btn-secondary-order:hover{background:#16496f;color:#fff}
+.summary-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:15px}.summary-box{border-radius:13px;padding:14px;background:#fff;border:1px solid #d7e2ed}.summary-box strong{display:block;font-size:25px;color:#123b63}.summary-box span{font-size:12px;color:#64748b;font-weight:700}
+.admin-box{background:#fff8e8;border:1px solid #f1d49b;border-radius:12px;padding:10px 12px;font-size:13px}.admin-edit{display:flex;gap:5px;align-items:center}.admin-edit input{width:90px}.hidden-category{display:none!important}
+@media(max-width:900px){.summary-grid{grid-template-columns:repeat(2,1fr)}.smr-head{align-items:flex-start;flex-direction:column}}
+@media(max-width:600px){.summary-grid{grid-template-columns:1fr}.smr-title{font-size:24px}.smr-table{font-size:12px}.smr-table th,.smr-table td{padding:6px}}
+</style>
+
+<div class="smr-page">
+<div class="container">
+  <div class="smr-head">
+    <div><h1 class="smr-title">Stock Summary</h1><div class="smr-sub">Stock Management &amp; Reporting</div></div>
+    <div class="text-muted small">Home &nbsp;›&nbsp; Reports &nbsp;›&nbsp; Stock Summary</div>
+  </div>
+
+  {% if not dealers %}
+    <div class="alert alert-warning">No dealer is mapped to this user yet.</div>
+  {% else %}
+  <div class="row g-3">
+    <div class="col-lg-5">
+      <div class="smr-card">
+        <div class="smr-card-head">🏪 Dealer Selection</div>
+        <div class="smr-card-body">
+          <form method="get" action="{{ url_for('smr') }}">
+            <select class="smr-select" name="dealer_id" onchange="this.form.submit()">
+              {% for d in dealers %}
+                <option value="{{ d.id }}" {% if selected_dealer and d.id==selected_dealer.id %}selected{% endif %}>{{ d.dealer_name }} — {{ d.town }}</option>
+              {% endfor %}
+            </select>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-4">
+      <div class="smr-card">
+        <div class="smr-card-head">👥 Mapped Team Members</div>
+        <div class="smr-card-body"><div class="smr-team">
+          {% for m in mapped_members %}<div class="team-pill">👤 {{ m.name }} <span class="text-muted">({{ m.role }})</span></div>{% endfor %}
+        </div></div>
+      </div>
+    </div>
+    <div class="col-lg-3">
+      <div class="smr-card">
+        <div class="smr-card-head">ℹ️ Report Controls</div>
+        <div class="smr-card-body">
+          <div class="smr-actions">
+            <a class="btn btn-sm btn-excel" href="{{ url_for('smr_export', dealer_id=selected_dealer.id if selected_dealer else '') }}">⬇ Export to Excel</a>
+          </div>
+          <div class="small text-muted mt-2">All catalogue products remain visible, including zero-stock products.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3 mt-1">
+    <div class="col-lg-5">
+      <div class="smr-card"><div class="smr-card-head">👤 Employee Details</div><div class="smr-card-body">
+        <div><span class="smr-label">Employee</span><div class="smr-value">{{ employee.name if employee else selected_dealer.emp_name }}</div></div>
+        <div class="mt-2"><span class="smr-label">MIS / User Code</span><div class="smr-value">{{ (employee.user_code if employee else selected_dealer.emp_code) or '-' }}</div></div>
+        <div class="mt-2"><span class="smr-label">Role</span><div class="smr-value">{{ employee.role if employee else 'Mapped Employee' }}</div></div>
+      </div></div>
+    </div>
+    <div class="col-lg-4">
+      <div class="smr-card"><div class="smr-card-head">🏬 Dealer Details</div><div class="smr-card-body">
+        <div><span class="smr-label">Dealer Name</span><div class="smr-value">{{ selected_dealer.dealer_name }}</div></div>
+        <div class="mt-2"><span class="smr-label">Dealer SAP Code</span><div class="smr-value">{{ selected_dealer.sap_code }}</div></div>
+        <div class="mt-2"><span class="smr-label">Town</span><div class="smr-value">{{ selected_dealer.town }}</div></div>
+      </div></div>
+    </div>
+    <div class="col-lg-3">
+      <div class="smr-card"><div class="smr-card-head">🔐 MRP Control</div><div class="smr-card-body">
+        {% if is_admin %}<div class="admin-box"><b>Admin access enabled.</b><br>MRP can be edited and saved product-by-product.</div>
+        {% else %}<div class="small text-muted">MRP is visible for reporting. <b>Only Admin</b> can edit MRP.</div>{% endif %}
+      </div></div>
+    </div>
+  </div>
+
+  <div class="d-flex gap-2 align-items-center mt-3">
+    <input id="smrSearch" class="smr-search" style="max-width:420px" placeholder="🔎 Search product or category..." oninput="filterSMR()">
+  </div>
+  <div class="category-tabs" id="categoryTabs">
+    <button class="category-tab active" data-category="all" onclick="showCategory('all',this)">All Categories</button>
+    {% for g in groups %}<button class="category-tab" data-category="{{ g.category|e }}" onclick="showCategory('{{ g.category|e }}',this)">{{ g.category }} ({{ g.rows|length }})</button>{% endfor %}
+  </div>
+
+  <form method="post" action="{{ url_for('smr_secondary_order') }}" id="secondaryForm">
+    <input type="hidden" name="dealer_id" value="{{ selected_dealer.id }}">
+    {% for g in groups %}
+    <section class="stock-section category-section" data-category="{{ g.category }}">
+      <div class="stock-head"><span>📦 {{ g.category }}</span><small>{{ g.rows|length }} product(s)</small></div>
+      <div class="table-responsive">
+        <table class="table table-bordered smr-table product-table">
+          <thead><tr><th>S.No</th><th>Product Name</th><th>MRP (₹)</th><th>Opening Stock</th><th>Primary Order</th><th>Secondary Order</th><th>Closing Stock</th>{% if is_admin %}<th>Admin MRP</th>{% endif %}</tr></thead>
+          <tbody>
+          {% for r in g.rows %}
+            <tr class="product-row" data-search="{{ (r.name ~ ' ' ~ r.category)|lower }}">
+              <td>{{ loop.index }}</td><td class="text-start"><b>{{ r.name }}</b></td><td class="mrp">₹{{ '%.2f'|format(r.mrp) }}</td>
+              <td>{{ r.opening }}</td><td>{{ r.primary }}</td>
+              <td><input class="qty-input" type="number" min="0" step="1" name="secondary_qty_{{ r.id }}" value="0" aria-label="Secondary order for {{ r.name }}"></td>
+              <td class="{% if r.closing==0 %}zero{% endif %}">{{ r.closing }}</td>
+              {% if is_admin %}<td><div class="admin-edit"><input id="mrp-{{ r.id }}" class="form-control form-control-sm" type="number" min="0" step="0.01" value="{{ '%.2f'|format(r.mrp) }}"><button class="btn btn-sm btn-outline-primary" type="button" onclick="saveMRP({{ r.id }},{{ selected_dealer.id }})">Save</button></div></td>{% endif %}
+            </tr>
+          {% endfor %}
+          <tr class="cat-total"><td colspan="3">Category Total</td><td>{{ g.rows|sum(attribute='opening') }}</td><td>{{ g.rows|sum(attribute='primary') }}</td><td>{{ g.rows|sum(attribute='secondary') }}</td><td>{{ g.rows|sum(attribute='closing') }}</td>{% if is_admin %}<td></td>{% endif %}</tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endfor %}
+    <div class="d-flex justify-content-end mt-3"><button class="btn btn-secondary-order px-4" type="submit">💾 Save Secondary Order</button></div>
+  </form>
+
+  <div class="summary-grid">
+    <div class="summary-box"><span>Total Products</span><strong>{{ totals.products }}</strong></div>
+    <div class="summary-box"><span>Total Opening Stock</span><strong>{{ totals.opening }}</strong></div>
+    <div class="summary-box"><span>Total Primary Order</span><strong>{{ totals.primary }}</strong></div>
+    <div class="summary-box"><span>Total Secondary Order</span><strong>{{ totals.secondary }}</strong></div>
+  </div>
+  <div class="alert alert-info mt-3 mb-0 small">Closing Stock is the live inventory value. Primary and Secondary Order columns are read from saved order history for the selected dealer. Zero-stock products are intentionally retained in SMR and Excel export.</div>
+  {% endif %}
+</div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function showCategory(cat,btn){
+  document.querySelectorAll('.category-tab').forEach(b=>b.classList.remove('active')); btn.classList.add('active');
+  document.querySelectorAll('.category-section').forEach(s=>s.classList.toggle('hidden-category',cat!=='all' && s.dataset.category!==cat));
+  filterSMR();
+}
+function saveMRP(productId,dealerId){
+  const value=document.getElementById('mrp-'+productId).value;
+  if(value==='' || Number(value)<0){alert('Enter a valid MRP.');return;}
+  const f=document.createElement('form'); f.method='POST'; f.action='/admin/smr/mrp/'+productId;
+  const a=document.createElement('input'); a.type='hidden'; a.name='mrp'; a.value=value;
+  const b=document.createElement('input'); b.type='hidden'; b.name='dealer_id'; b.value=dealerId;
+  f.append(a,b); document.body.appendChild(f); f.submit();
+}
+function filterSMR(){
+  const q=(document.getElementById('smrSearch').value||'').toLowerCase().trim();
+  document.querySelectorAll('.product-row').forEach(r=>r.style.display=(!q||r.dataset.search.includes(q))?'':'none');
+  document.querySelectorAll('.category-section').forEach(s=>{
+    if(s.classList.contains('hidden-category')) return;
+    const visible=[...s.querySelectorAll('.product-row')].some(r=>r.style.display!=='none');
+    s.style.display=visible?'':'none';
+  });
+}
+</script>
+{% endblock %}

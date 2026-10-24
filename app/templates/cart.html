@@ -1,0 +1,24 @@
+{% extends "base.html" %}{% block title %}Cart{% endblock %}
+{% block content %}
+<div class="container py-5"><h2>Your Cart</h2>
+{% if items %}
+<div class="table-responsive mt-4"><table class="table align-middle">
+<thead><tr><th>Product</th><th>Flavor</th><th>Price</th><th>Qty</th><th>Subtotal</th><th></th></tr></thead>
+<tbody>
+{% for i in items %}
+<tr>
+<td><b>{{i.product.name}}</b><br><small>{{i.product.product_code}}</small></td>
+<td>{{i.flavor or 'Standard'}}</td>
+<td>₹{{"%.2f"|format(i.product.price)}}</td>
+<td>{{i.quantity}}</td>
+<td>₹{{"%.2f"|format(i.subtotal)}}</td>
+<td><form method="post" action="{{url_for('remove_cart',cart_key=i.cart_key)}}"><button class="btn btn-sm btn-outline-danger">Remove</button></form></td>
+</tr>
+{% endfor %}
+</tbody></table></div>
+<div class="text-end"><h3>Total: ₹{{"%.2f"|format(total)}}</h3>
+<form method="post" action="{{url_for('checkout')}}"><button class="btn btn-success btn-lg">Place Order</button></form></div>
+{% else %}
+<div class="empty-box mt-4"><h4>Your cart is empty</h4><a href="{{url_for('products')}}" class="btn btn-primary">Browse Products</a></div>
+{% endif %}
+</div>{% endblock %}

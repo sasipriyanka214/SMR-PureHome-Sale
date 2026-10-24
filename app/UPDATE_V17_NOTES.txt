@@ -1,0 +1,20 @@
+SMR PureHome Order System - Update V17
+
+Implemented updates:
+1. Removed the duplicate Products navigation item from the top bar.
+2. Removed the Cart action from Primary Order Review. The action is now PLACE ORDER.
+3. Added a dedicated Billing Date field to the orders table with automatic migration for existing databases.
+4. User Orders and Admin Orders now show only records for the selected billing date. The default date is today.
+5. Admin can independently set each dealer order status to Pending, Confirmed, or Cancelled.
+6. User accounts remain read-only for users; only Admin can edit existing User Names and Admin can add new users.
+7. Depot Stock Excel matching continues to use Product Name as the only matching key.
+8. Multiple rows/batches with the same normalized Product Name are cumulative: their quantities are summed into one stock value.
+9. Depot Stock Excel upload is treated as a full snapshot: old depot quantities are reset, products missing from the file become quantity 0 and INACTIVE, and products present in the file update Products/Inventory automatically.
+10. A genuinely new product keeps the actual Product Name from Excel and is highlighted as NEW PRODUCT; no artificial names such as "1NEW PRODUCT" are generated.
+11. Existing Product Names are reused when the normalized Excel Product Name matches the master Product Name.
+12. Global Back navigation remains available and is mobile-friendly.
+13. Login for normal users continues to open the Home page first.
+
+Important:
+- The supplied database is not included in this source package. On first run, the application creates/migrates database.db automatically.
+- Existing databases receive the new billing_date column automatically and existing order_date values are copied into it.

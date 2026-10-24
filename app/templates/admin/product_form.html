@@ -1,0 +1,12 @@
+{% extends "admin/base_admin.html" %}{% block title %}{{"Edit" if product else "Add"}} Product{% endblock %}
+{% block admin_content %}<div class="panel form-panel"><h2>{{"Edit" if product else "Add"}} Product</h2><form method="post" class="row g-3 mt-1">
+<div class="col-md-6"><label>Product Code</label><input class="form-control" name="product_code" required value="{{product.product_code if product else ''}}"></div>
+<div class="col-md-6"><label>Product Name</label><input class="form-control" name="name" required value="{{product.name if product else ''}}"></div>
+<div class="col-md-6"><label>Category</label><input class="form-control" name="category" value="{{product.category if product else ''}}"></div>
+<div class="col-md-6"><label>MRP (₹)</label><input class="form-control" type="number" step="0.01" min="0" name="mrp" value="{{product.mrp if product else 0}}"></div><div class="col-md-6"><label>Price (₹)</label><input class="form-control" type="number" step="0.01" min="0" name="price" value="{{product.price if product else 0}}"></div>
+<div class="col-md-6"><label>Stock</label><input class="form-control" type="number" min="0" name="stock" value="{{product.stock if product else 0}}"></div>
+<div class="col-md-6"><label>Image URL (optional)</label><input class="form-control" name="image_url" value="{{product.image_url if product else ''}}"></div>
+<div class="col-12"><label>Description</label><textarea class="form-control" name="description" rows="4">{{product.description if product else ''}}</textarea></div>
+<div class="col-md-6"><label>Status</label><select class="form-select" name="status"><option {{'selected' if not product or product.status=='ACTIVE'}}>ACTIVE</option><option {{'selected' if product and product.status=='INACTIVE'}}>INACTIVE</option></select></div>
+<div class="col-12"><button class="btn btn-success">Save Product</button> <a class="btn btn-outline-secondary" href="{{url_for('admin_products')}}">Cancel</a></div>
+</form></div>{% endblock %}

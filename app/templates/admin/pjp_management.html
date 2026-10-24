@@ -1,0 +1,28 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}PJP Management{% endblock %}
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+  <div><h2 class="mb-1">PJP Management</h2><p class="text-muted mb-0">Manage monthly PJP targets and view User/TSI progress.</p></div>
+  <a class="btn btn-outline-primary" href="{{url_for('admin_beat_names')}}">🧭 Beat Names</a>
+</div>
+<form method="get" class="panel mb-4"><div class="row g-3 align-items-end">
+  <div class="col-md-5"><label class="form-label fw-semibold">Month</label><select name="month" class="form-select">{% for m in range(1,13) %}<option value="{{m}}" {% if m==month %}selected{% endif %}>{{['January','February','March','April','May','June','July','August','September','October','November','December'][m-1]}}</option>{% endfor %}</select></div>
+  <div class="col-md-4"><label class="form-label fw-semibold">Year</label><input name="year" type="number" class="form-control" value="{{year}}"></div>
+  <div class="col-md-3"><button class="btn btn-outline-primary w-100">Load Month</button></div>
+</div></form>
+<div class="panel mb-4"><h4 class="mb-3">PJP Targets · {{month_label}}</h4>
+<form method="post" class="row g-3 align-items-end">
+<input type="hidden" name="action" value="target"><input type="hidden" name="year" value="{{year}}"><input type="hidden" name="month" value="{{month}}">
+<div class="col-lg-3"><label class="form-label">User / TSI</label><select name="user_id" class="form-select" required>{% for u in users if u.role == 'USER' %}<option value="{{u.id}}">{{u.name}}{% if u.user_code %} · {{u.user_code}}{% endif %}</option>{% endfor %}</select></div>
+<div class="col-md-4 col-lg-2"><label class="form-label">Primary Sales Target</label><input name="primary_sales_target" type="number" step="0.01" min="0" class="form-control" value="0"></div>
+<div class="col-md-4 col-lg-2"><label class="form-label">Secondary Sales Target</label><input name="secondary_sales_target" type="number" step="0.01" min="0" class="form-control" value="0"></div>
+<div class="col-md-4 col-lg-2"><label class="form-label">Outlet Visits Target</label><input name="total_outlet_visits_target" type="number" min="0" class="form-control" value="0"></div>
+<div class="col-lg-2"><button class="btn btn-primary w-100">Save / Update</button></div></form>
+</div>
+<div class="panel"><div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3"><div><h4 class="mb-1">User / TSI Target &amp; Achievement</h4><p class="text-muted mb-0">Targets come from PJP Management; achievements are calculated from confirmed/completed sales for this month.</p></div><span class="badge text-bg-light">{{month_label}}</span></div>
+<div class="table-responsive"><table class="table align-middle"><thead><tr><th>User / TSI</th><th>Primary Target</th><th>Primary Achieved</th><th>Primary Remaining</th><th>Secondary Target</th><th>Secondary Achieved</th><th>Secondary Remaining</th><th>Outlet Target</th><th>Outlet Achieved</th><th>Outlet Remaining</th><th>PJP Planned</th></tr></thead><tbody>
+{% for r in progress_rows %}<tr><td><strong>{{r.name}}</strong><br><small class="text-muted">{{r.user_code or ''}}</small></td><td>₹ {{'{:,.0f}'.format(r.primary_target)}}</td><td class="text-success fw-bold">₹ {{'{:,.0f}'.format(r.primary_achieved)}}</td><td class="text-danger fw-bold">₹ {{'{:,.0f}'.format(r.primary_remaining)}}</td><td>₹ {{'{:,.0f}'.format(r.secondary_target)}}</td><td class="text-success fw-bold">₹ {{'{:,.0f}'.format(r.secondary_achieved)}}</td><td class="text-danger fw-bold">₹ {{'{:,.0f}'.format(r.secondary_remaining)}}</td><td>{{r.outlet_target}}</td><td class="text-success fw-bold">{{r.outlet_achieved}}</td><td class="text-danger fw-bold">{{r.outlet_remaining}}</td><td>{{r.planned_visits}}</td></tr>{% else %}<tr><td colspan="11" class="text-center text-muted py-4">No Users found.</td></tr>{% endfor %}
+</tbody></table></div></div>
+<div class="alert alert-light border mt-3"><strong>Beat assignments:</strong> use <a href="{{url_for('admin_beat_names')}}">Beat Names</a>. PJP Management does not create or map beats.</div>
+<div class="alert alert-light border"><strong>Existing Admin account:</strong> MIS09438 — Chebrolu Naga Vijaykumar. This Admin name is preserved.</div>
+{% endblock %}

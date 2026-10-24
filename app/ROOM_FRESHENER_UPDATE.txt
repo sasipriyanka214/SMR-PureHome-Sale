@@ -1,0 +1,20 @@
+Room Freshener update
+
+Pure Home categories added/expanded:
+1. Room Freshener 126GM/220ML
+   - 13 sub-products from the supplied catalogue
+   - MRP 189 for first 7; MRP 169 for remaining 6
+   - Case size 60
+   - Rate 119.752 / 107.08 respectively
+   - Primary order quantity: minimum 30, then +30 only
+   - Scheme: 40% trade promotion; 44% on 5 CS; 46% on 10 CS; 47% on 25 CS
+
+2. Room Freshener Nector
+   - 11 sub-products from the supplied catalogue
+   - MRP 65 except Pack of 5 Nector at MRP 350
+   - Case size 162
+   - Rate 44.77 except Pack of 5 Nector at 223.85
+   - Primary order quantity: minimum 6, then +6 only
+   - Scheme: 33% trade promotion; 35% on 3 CS; 36% on 5 CS; 37% on 10 CS
+
+All MRP and Rate values are product-master values. Scheme is selected automatically from quantity converted to CS using the product case size.
