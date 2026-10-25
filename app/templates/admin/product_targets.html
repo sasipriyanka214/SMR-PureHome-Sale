@@ -8,6 +8,55 @@
   </div>
 </div>
 
+<div class="panel mb-4">
+  <h5>Employee Product Target</h5>
+  <p class="text-muted">Set or update a monthly quantity target for one active employee and product.</p>
+  <form id="monthly-product-target-form" class="row g-3 align-items-end">
+    <div class="col-md-3">
+      <label class="form-label" for="monthly-target-user">Employee</label>
+      <select id="monthly-target-user" name="user_id" class="form-select" required>
+        <option value="">Select employee</option>
+        {% for user in target_users %}
+        <option value="{{user.id}}">{{user.name}}{% if user.user_code %} · {{user.user_code}}{% endif %}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label" for="monthly-target-product">Product</label>
+      <select id="monthly-target-product" name="product_id" class="form-select" required>
+        <option value="">Select product</option>
+        {% for product in target_products %}
+        <option value="{{product.id}}">{{product.name}} · {{product.product_code}}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label" for="monthly-target-month">Month</label>
+      <input id="monthly-target-month" name="month_year" type="month" class="form-control" value="{{month_year}}" required>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label" for="monthly-target-qty">Target quantity</label>
+      <input id="monthly-target-qty" name="target_qty" type="number" class="form-control" min="0" step="1" value="0" required>
+    </div>
+    <div class="col-md-1">
+      <button class="btn btn-primary w-100" type="submit">Save</button>
+    </div>
+    <div class="col-12"><small id="monthly-target-message" aria-live="polite" class="text-muted"></small></div>
+  </form>
+  <div class="table-responsive mt-3">
+    <table class="table table-sm align-middle mb-0">
+      <thead><tr><th>Employee</th><th>Product</th><th>Month</th><th>Target Quantity</th></tr></thead>
+      <tbody>
+        {% for target in monthly_targets %}
+        <tr><td>{{target.user_name}}</td><td>{{target.product_name}} <small class="text-muted">· {{target.product_code}}</small></td><td>{{month_year}}</td><td>{{target.target_qty}}</td></tr>
+        {% else %}
+        <tr><td colspan="4" class="text-muted text-center py-3">No employee product targets for this month.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
 <form method="get" class="panel mb-4">
   <div class="row g-3 align-items-end">
     <div class="col-md-5">
@@ -71,4 +120,30 @@
 
   <button type="submit" class="btn btn-primary px-4">Save Product Targets</button>
 </form>
+<script>
+document.getElementById("monthly-product-target-form")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const message = document.getElementById("monthly-target-message");
+  const submitButton = form.querySelector('button[type="submit"]');
+  message.textContent = "Saving target...";
+  submitButton.disabled = true;
+  try {
+    const response = await fetch("{{url_for('save_monthly_target')}}", {
+      method: "POST",
+      body: new FormData(form),
+      headers: { "Accept": "application/json" }
+    });
+    const result = await response.json();
+    message.textContent = result.message || "Could not save target.";
+    message.className = response.ok && result.success ? "text-success" : "text-danger";
+    if (response.ok && result.success) window.location.reload();
+  } catch (error) {
+    message.textContent = "Could not save target. Please try again.";
+    message.className = "text-danger";
+  } finally {
+    submitButton.disabled = false;
+  }
+});
+</script>
 {% endblock %}

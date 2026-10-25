@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="google-site-verification" content="oedcvmpUKh6g0Yat9B6_vVaCLvqBChU_qJTDHP9H7ZY">
 <title>ENVY — {{ 'Admin' if admin else 'User' }} Login</title>
 <style>
 *{box-sizing:border-box}
@@ -12,13 +13,15 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#050509;fon
 .scene-shade{position:absolute;inset:0;background:linear-gradient(90deg,rgba(0,0,0,.02),rgba(0,0,0,.10));z-index:1;pointer-events:none}
 
 /* The form is a REAL Flask form. It is never part of the video. */
-.login-panel{position:absolute;z-index:10;right:5.5vw;top:50%;width:min(450px,35vw);min-width:370px;transform:translateY(-46%) translateY(24px);opacity:0;visibility:visible;pointer-events:none;padding:34px 38px 30px;border-radius:24px;background:rgba(10,11,16,.94);border:1px solid rgba(255,255,255,.15);box-shadow:0 28px 80px rgba(0,0,0,.60),0 0 45px rgba(235,25,40,.12);backdrop-filter:blur(10px);transition:opacity .75s ease,transform .75s ease}
+.login-panel{position:absolute;z-index:10;right:5.5vw;top:50%;width:min(450px,35vw);min-width:370px;transform:translateY(-46%) translateY(24px);opacity:0;visibility:visible;pointer-events:none;padding:34px 38px 30px;border-radius:24px;background:rgba(10,11,16,.94);border:1px solid rgba(255,255,255,.15);box-shadow:0 28px 80px rgba(0,0,0,.60),0 0 45px rgba(235,25,40,.12);backdrop-filter:blur(10px);transition:opacity .35s ease,transform .35s ease}
 /* CSS fallback: the login must appear even if a browser blocks/interrupts the video JS event. */
-.login-panel{animation:loginReveal .75s ease 8.35s forwards}
+.login-panel{animation:loginReveal .35s ease .3s forwards}
 @keyframes loginReveal{from{opacity:0;transform:translateY(-46%) translateY(24px);pointer-events:none}to{opacity:1;transform:translateY(-50%);pointer-events:auto}}
-.login-panel.show{opacity:1;visibility:visible;pointer-events:auto;transform:translateY(-50%);animation:none;transition:opacity .75s ease,transform .75s ease}
+.login-panel.show{opacity:1;visibility:visible;pointer-events:auto;transform:translateY(-50%);animation:none;transition:opacity .35s ease,transform .35s ease}
 
 .role-title{text-align:center;font-size:11px;letter-spacing:2.5px;color:#9ca3af;font-weight:800;margin:0 0 9px}
+.login-brand{text-align:center;margin:-10px 0 12px}
+.login-brand img{width:68px;height:68px;object-fit:cover;border-radius:10px}
 .role-switch{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:24px;padding:5px;border-radius:13px;background:rgba(255,255,255,.07)}
 .role-switch button{height:46px;border:0;border-radius:10px;background:transparent;color:#aeb5c1;font-size:14px;font-weight:800;cursor:pointer;transition:.2s}
 .role-switch button.active{background:#fff;color:#15161b;box-shadow:0 5px 18px rgba(0,0,0,.25)}
@@ -67,6 +70,7 @@ h1{font-size:34px;line-height:1.1;margin:0 0 8px;font-weight:800}h1 span{color:#
     <div id="loading" class="loading">ENVY • PREPARING SECURE LOGIN</div>
 
     <section id="loginPanel" class="login-panel" aria-hidden="true">
+        <div class="login-brand"><img src="{{ url_for('static', filename='images/smr-sales-logo.png') }}" alt="SMR Sales App"></div>
         <div class="role-title">SELECT LOGIN TYPE</div>
         <div class="role-switch" role="tablist" aria-label="Login type">
             <button id="userTab" type="button" role="tab" aria-selected="true" onclick="setRole('user')">👤 USER</button>
@@ -104,31 +108,17 @@ const form=document.getElementById('loginForm');
 const userTab=document.getElementById('userTab');
 const adminTab=document.getElementById('adminTab');
 let revealed=false;
-let revealTimer=null;
 
 function revealLogin(){
     if(revealed)return;
     revealed=true;
-    if(revealTimer) clearTimeout(revealTimer);
-    try { video.pause(); } catch(e) {}
     panel.classList.add('show');
     panel.setAttribute('aria-hidden','false');
     loading.classList.add('hide');
     setTimeout(()=>document.getElementById('username').focus(),750);
 }
 
-/*
- * The ENVY MP4 plays exactly once in the full-screen background.
- * The real HTML/Flask login form is revealed after the video finishes.
- * We use both the ended event and a duration-based safety timer so the
- * form cannot remain hidden if a browser fails to fire "ended".
- */
-video.addEventListener('loadedmetadata',()=>{
-    if(Number.isFinite(video.duration) && video.duration>0){
-        /* Reveal just after the animation completes. */
-        revealTimer=setTimeout(revealLogin, Math.ceil(video.duration*1000)+150);
-    }
-});
+/* Keep login available while the background video continues playing. */
 video.addEventListener('ended',revealLogin);
 video.addEventListener('error',revealLogin);
 
@@ -137,10 +127,10 @@ video.play().catch(()=>{
     revealLogin();
 });
 
-/* The supplied MP4 is about 8.93 seconds. This guarantees the form appears. */
+/* Show the form promptly even if the video takes time to load. */
 setTimeout(()=>{
     revealLogin();
-},8500);
+},350);
 
 function setRole(role){
     const isAdmin=role==='admin';

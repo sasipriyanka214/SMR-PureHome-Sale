@@ -1,6 +1,7 @@
-from flask import Flask, render_template, request, redirect, url_for, session, flash, send_file, jsonify
+from flask import Flask, abort, render_template, request, redirect, url_for, session, flash, send_file, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
 import os, io, csv, re
+import math
 from datetime import datetime, date
 import calendar
 from openpyxl import Workbook, load_workbook
@@ -528,7 +529,10 @@ def init_db():
         email TEXT UNIQUE NOT NULL,
         password TEXT NOT NULL,
         role TEXT NOT NULL DEFAULT 'USER',
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        can_edit_products BOOLEAN NOT NULL DEFAULT FALSE,
+        can_view_reports BOOLEAN NOT NULL DEFAULT FALSE
     );
 
     CREATE TABLE IF NOT EXISTS monthly_targets(
@@ -579,6 +583,18 @@ def init_db():
         status TEXT NOT NULL DEFAULT 'ACTIVE',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS monthly_product_targets(
+        user_id INTEGER NOT NULL,
+        product_id INTEGER NOT NULL,
+        month_year TEXT NOT NULL,
+        target_qty INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(user_id, product_id, month_year),
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS orders(
@@ -706,6 +722,12 @@ def init_db():
     user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
     if "profile_image" not in user_columns:
         conn.execute("ALTER TABLE users ADD COLUMN profile_image TEXT")
+    if "is_active" not in user_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT TRUE")
+    if "can_edit_products" not in user_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN can_edit_products BOOLEAN NOT NULL DEFAULT FALSE")
+    if "can_view_reports" not in user_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN can_view_reports BOOLEAN NOT NULL DEFAULT FALSE")
 
     # Upgrade databases created by earlier versions.
     # Primary Orders are also real Orders, so keep the common Orders tables
@@ -764,7 +786,49 @@ def init_db():
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_user_code ON users(user_code) WHERE user_code IS NOT NULL AND user_code<>''")
 
     # Dealer and employee/user mapping imported from EMP.xlsx.
-    dealer_seed = [['Sri Veera Brahmendra Agencies', 'CGT000014', 'Kavali', 'D Pavan Kumar', 'MIS09927'], ['Divya Enterprises', 'CGT000032', 'Chirala', 'D Pavan Kumar', 'MIS09927'], ['Gamya Agency', 'CGT003168', 'Tirupati', 'D Chiranjeevulu', 'MIS09243'], ['Ganapathi Agencies', 'CGT003200', 'Sompeta', 'VACANT (SKM)', 'NO'], ['GNANESWARI ENTERPRISES', 'CGT005503', 'SRIKAKULAM', 'VACANT (SKM)', 'NO'], ['Isha Enterprises', 'CGT002768', 'Srikakulam', 'VACANT (SKM)', 'NO'], ['Kartik Agencies', 'CGT003399', 'Visakhapatnam', 'Nadimpalli Akhil Varma', 'MIS10539'], ['LAKSHMI SRINIVASA AGENCY', 'CGT005597', 'RAJAMADRY', 'T Satyanarayana', 'MIS10048'], ['Lalitha Datta Sai Traders', 'CGT000041', 'Jangareddigudem', 'T Satyanarayana', 'MIS10048'], ['Madhulatha Traders', 'CGT000007', 'Tenali', 'K Navakanth', 'MIS08291'], ['Mahesh Enterprises', 'CGT003054', 'Hindupur', 'D Pavan Kumar', 'MIS09927'], ['Manikanta Agencies', 'CGT000059', 'Narsipatnam', 'Nadimpalli Akhil Varma', 'MIS10539'], ['Naga Vinayaka Enterprises', 'CGT003380', 'Guntur', 'K Navakanth', 'MIS08291'], ['Nithya Sree Enterprises', 'CGT002642', 'Proddatur', 'D Chiranjeevulu', 'MIS09243'], ['PRETHAM TRADERS', 'CGT005033', 'RAYACHOTI', 'D Chiranjeevulu', 'MIS09243'], ['R M Enterprises', 'CGT000056', 'Madanapalle', 'D Chiranjeevulu', 'MIS09243'], ['Sai Manikanta Enterprises', 'CGT000034', 'Madhurawada', 'Nadimpalli Akhil Varma', 'MIS10539'], ['Samba Murthy Agencies', 'CGT000023', 'Vizianagaram', 'VACANT (SKM)', 'NO'], ['SHIVA MARKETING', 'CGT000057', 'TEKKALI', 'VACANT (SKM)', 'NO'], ['SMA Traders', 'CGT004825', 'NELLORE', 'D Pavan Kumar', 'MIS09927'], ['SR AGENCIES', 'CGT006047', 'TIRUPATHI', 'D Chiranjeevulu', 'MIS09243'], ['Sree Subramanyeswara Agencies', 'CGT000024', 'Anantapur', 'D Pavan Kumar', 'MIS09927'], ['Sri Brundavan Agencies', 'CGT000043', 'Tadipatri', 'D Pavan Kumar', 'MIS09927'], ['Sri Hussainiah Swamy Agencies', 'CGT002840', 'MYDUKUR', 'D Chiranjeevulu', 'MIS09243'], ['Sri Lakshmi Agencies', 'CGT000035', 'Chilakaluripet', 'K Navakanth', 'MIS08291'], ['Sri Laxmi Venkateshwara Enterprises', 'CGT000008', 'Gudur', 'D Pavan Kumar', 'MIS09927'], ['SRI MAHALAKSHMI AGENCIES', 'CGT005018', 'NARASAROPETA', 'K Navakanth', 'MIS08291'], ['Sri Nagalakshmi Agencies', 'CGT000018', 'ONGOLE', 'K Navakanth', 'MIS08291'], ['Sri Sai Krishna Enterprises', 'CGT002994', 'Kadapa', 'D Chiranjeevulu', 'MIS09243'], ['Sri Sai Lakshmi Enterprises', 'CGT003265', 'Madhurawada', 'Nadimpalli Akhil Varma', 'MIS10539'], ['Sri Sai Nikshit Agencies', 'CGT000045', 'Eluru', 'A Vamsi Krishna', 'MIS10476'], ['SRI SAINANDINI ENTERPRISES', 'CGT005658', 'TADEPALLIGUDEM', 'T Satyanarayana', 'MIS10048'], ['Sri Shiridi Sai Chemicals', 'CGT000019', 'Vijayawada', 'A Vamsi Krishna', 'MIS10476'], ['Sri Veda Enterprises', 'CGT002835', 'Anakapalli', 'Nadimpalli Akhil Varma', 'MIS10539'], ['Sujatha Agencies', 'CGT000026', 'NAIDUPETA', 'D Pavan Kumar', 'MIS09927'], ['SUNRISE ENTERPRISES', 'CGT006118', 'Vijayawada', 'A Vamsi Krishna', 'MIS10476'], ['Surya Enterprises', 'CGT000027', 'Srikakulam', 'VACANT (SKM)', 'NO'], ['V Agencies', 'CGT003190', 'Nandyal', 'VACANT', 'NO'], ['V ENTERPRISES', 'CGT005439', 'KURNOOL', 'VACANT', 'NO'], ['Vasavi Ganesh Agencies', 'CGT002589', 'Kakinada', 'T Satyanarayana', 'MIS10048'], ['Manasa Agencies', 'CGT000042', 'GAJUWAKA', 'Nadimpalli Akhil Varma', 'MIS10539']]
+    dealer_seed = [
+        ['Sri Veera Brahmendra Agencies', 'CGT000014', 'Kavali', 'D Pavan Kumar', 'MIS09927'],
+        ['Divya Enterprises', 'CGT000032', 'Chirala', 'D Pavan Kumar', 'MIS09927'],
+        ['Gamya Agency', 'CGT003168', 'Tirupati', 'D Chiranjeevulu', 'MIS09243'],
+        ['Ganapathi Agencies', 'CGT003200', 'Sompeta', 'VACANT (SKM)', 'NO'],
+        ['GNANESWARI ENTERPRISES', 'CGT005503', 'SRIKAKULAM', 'VACANT (SKM)', 'NO'],
+        ['Isha Enterprises', 'CGT002768', 'Srikakulam', 'VACANT (SKM)', 'NO'],
+        ['Kartik Agencies', 'CGT003399', 'Visakhapatnam', 'Nadimpalli Akhil Varma', 'MIS10539'],
+        ['LAKSHMI SRINIVASA AGENCY', 'CGT005597', 'RAJAMADRY', 'T Satyanarayana', 'MIS10048'],
+        ['Lalitha Datta Sai Traders', 'CGT000041', 'Jangareddigudem', 'T Satyanarayana', 'MIS10048'],
+        ['Madhulatha Traders', 'CGT000007', 'Tenali', 'K Navakanth', 'MIS08291'],
+        ['Mahesh Enterprises', 'CGT003054', 'Hindupur', 'D Pavan Kumar', 'MIS09927'],
+        ['Manikanta Agencies', 'CGT000059', 'Narsipatnam', 'Nadimpalli Akhil Varma', 'MIS10539'],
+        ['Naga Vinayaka Enterprises', 'CGT003380', 'Guntur', 'K Navakanth', 'MIS08291'],
+        ['Nithya Sree Enterprises', 'CGT002642', 'Proddatur', 'D Chiranjeevulu', 'MIS09243'],
+        ['PRETHAM TRADERS', 'CGT005033', 'RAYACHOTI', 'D Chiranjeevulu', 'MIS09243'],
+        ['R M Enterprises', 'CGT000056', 'Madanapalle', 'D Chiranjeevulu', 'MIS09243'],
+        ['Sai Manikanta Enterprises', 'CGT000034', 'Madhurawada', 'Nadimpalli Akhil Varma', 'MIS10539'],
+        ['Samba Murthy Agencies', 'CGT000023', 'Vizianagaram', 'VACANT (SKM)', 'NO'],
+        ['SHIVA MARKETING', 'CGT000057', 'TEKKALI', 'VACANT (SKM)', 'NO'],
+        ['SMA Traders', 'CGT004825', 'NELLORE', 'D Pavan Kumar', 'MIS09927'],
+        ['SR AGENCIES', 'CGT006047', 'TIRUPATHI', 'D Chiranjeevulu', 'MIS09243'],
+        ['Sree Subramanyeswara Agencies', 'CGT000024', 'Anantapur', 'D Pavan Kumar', 'MIS09927'],
+        ['Sri Brundavan Agencies', 'CGT000043', 'Tadipatri', 'D Pavan Kumar', 'MIS09927'],
+        ['Sri Hussainiah Swamy Agencies', 'CGT002840', 'MYDUKUR', 'D Chiranjeevulu', 'MIS09243'],
+        ['Sri Lakshmi Agencies', 'CGT000035', 'Chilakaluripet', 'K Navakanth', 'MIS08291'],
+        ['Sri Laxmi Venkateshwara Enterprises', 'CGT000008', 'Gudur', 'D Pavan Kumar', 'MIS09927'],
+        ['SRI MAHALAKSHMI AGENCIES', 'CGT005018', 'NARASAROPETA', 'K Navakanth', 'MIS08291'],
+        ['Sri Nagalakshmi Agencies', 'CGT000018', 'ONGOLE', 'K Navakanth', 'MIS08291'],
+        ['Sri Sai Krishna Enterprises', 'CGT002994', 'Kadapa', 'D Chiranjeevulu', 'MIS09243'],
+        ['Sri Sai Lakshmi Enterprises', 'CGT003265', 'Madhurawada', 'Nadimpalli Akhil Varma', 'MIS10539'],
+        ['Sri Sai Nikshit Agencies', 'CGT000045', 'Eluru', 'A Vamsi Krishna', 'MIS10476'],
+        ['SRI SAINANDINI ENTERPRISES', 'CGT005658', 'TADEPALLIGUDEM', 'T Satyanarayana', 'MIS10048'],
+        ['Sri Shiridi Sai Chemicals', 'CGT000019', 'Vijayawada', 'A Vamsi Krishna', 'MIS10476'],
+        ['Sri Veda Enterprises', 'CGT002835', 'Anakapalli', 'Nadimpalli Akhil Varma', 'MIS10539'],
+        ['Sujatha Agencies', 'CGT000026', 'NAIDUPETA', 'D Pavan Kumar', 'MIS09927'],
+        ['SUNRISE ENTERPRISES', 'CGT006118', 'Vijayawada', 'A Vamsi Krishna', 'MIS10476'],
+        ['Surya Enterprises', 'CGT000027', 'Srikakulam', 'VACANT (SKM)', 'NO'],
+        ['V Agencies', 'CGT003190', 'Nandyal', 'VACANT', 'NO'],
+        ['V ENTERPRISES', 'CGT005439', 'KURNOOL', 'VACANT', 'NO'],
+        ['Vasavi Ganesh Agencies', 'CGT002589', 'Kakinada', 'T Satyanarayana', 'MIS10048'],
+        ['Manasa Agencies', 'CGT000042', 'GAJUWAKA', 'Nadimpalli Akhil Varma', 'MIS10539'],
+    ]
     for dealer_name, sap_code, town, emp_name, emp_code in dealer_seed:
         conn.execute("""
             INSERT INTO dealers(dealer_name,sap_code,town,emp_name,emp_code) VALUES(?,?,?,?,?)
@@ -880,7 +944,7 @@ def init_db():
         conn.execute("""
             INSERT INTO products(product_code,name,category,flavor,description,gm_ml,mrp,case_size,
                                  price,stock,image_url,status,created_at,updated_at)
-            SELECT ?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',?,?
+            SELECT ?,?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',?,?
             WHERE NOT EXISTS (SELECT 1 FROM products WHERE product_code=? )
         """, (new_code, product_name, "Nano", product_name, product_name,
               "25 GM/30 ML", 75, 144, 51.99, 100, "", nano_now, nano_now, new_code))
@@ -1295,7 +1359,7 @@ def sync_products_from_depot_rows(conn,stock_rows):
         else:
             base="DEPOT-"+re.sub(r"[^A-Z0-9]+","",name.upper())[:24] or "DEPOT-NEW"; code=base; n=2
             while conn.execute("SELECT 1 FROM products WHERE product_code=?",(code,)).fetchone(): code=f"{base}-{n}"; n+=1
-            conn.execute("INSERT INTO products(product_code,name,category,description,mrp,case_size,price,stock,image_url,status,stock_new,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",(code,name,'Imported','Added from Depot Stock Excel',0,0,0,qty,'','ACTIVE' if qty>0 else 'INACTIVE',1,now,now))
+            conn.execute("INSERT INTO products(product_code,name,category,description,mrp,case_size,price,stock,image_url,status,stock_new,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",(code,name,'Imported','Added from Depot Stock Excel',0,0,0,qty,'','ACTIVE' if qty>0 else 'INACTIVE',1,now,now))
             pid=conn.execute("SELECT last_insert_rowid()").fetchone()[0]
             conn.execute("INSERT INTO depot_stock(product_id,depot_name,quantity,updated_at) VALUES(?,?,?,?)",(pid,'Main Depot',qty,now))
             conn.execute("INSERT INTO inventory(product_id,available_quantity,reserved_quantity,reorder_level,updated_at) VALUES(?,?,?,?,?)",(pid,qty,0,10,now)); new_count+=1
@@ -1348,9 +1412,178 @@ def login_required():
 def admin_required():
     return session.get("role") == "ADMIN"
 
+_user_activation_schema_ready = False
+_tsst_schema_ready = False
+
+
+def _ensure_user_activation_schema(conn):
+    global _user_activation_schema_ready
+    if _user_activation_schema_ready:
+        return
+    conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE")
+    conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS can_edit_products BOOLEAN NOT NULL DEFAULT FALSE")
+    conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS can_view_reports BOOLEAN NOT NULL DEFAULT FALSE")
+    conn.commit()
+    _user_activation_schema_ready = True
+
+
+def _ensure_tsst_schema(conn):
+    global _tsst_schema_ready
+    if _tsst_schema_ready:
+        return
+    conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS tsst_designation TEXT NOT NULL DEFAULT ''")
+    conn.execute("""CREATE TABLE IF NOT EXISTS monthly_targets(
+        id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        year INTEGER NOT NULL,
+        month INTEGER NOT NULL,
+        target_amount REAL NOT NULL DEFAULT 0,
+        UNIQUE(user_id,year,month),
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS dealer_targets(
+        id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+        dealer_name TEXT NOT NULL,
+        sap_code TEXT,
+        target_amount REAL NOT NULL DEFAULT 0,
+        achieved_amount REAL NOT NULL DEFAULT 0,
+        month_year TEXT
+    )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS tsst_management_records(
+        id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+        employee_name TEXT NOT NULL,
+        emp_code TEXT,
+        metric_name TEXT,
+        score REAL NOT NULL DEFAULT 0,
+        metric_date TEXT
+    )""")
+    conn.commit()
+    _tsst_schema_ready = True
+
+
+def _manager_has_permission(permission):
+    if permission not in {"can_edit_products", "can_view_reports"}:
+        raise ValueError("Unknown manager permission.")
+    user_id = session.get("user_id")
+    if not user_id or session.get("role") != "MANAGER":
+        return False
+    conn = db()
+    try:
+        _ensure_user_activation_schema(conn)
+        user = conn.execute(
+            f"SELECT {permission} FROM users WHERE id=? AND role='MANAGER' AND is_active=TRUE",
+            (user_id,)
+        ).fetchone()
+        return bool(user and user[permission])
+    finally:
+        conn.close()
+
+
+def _product_edit_access_response():
+    if not login_required():
+        return redirect(url_for("login"))
+    if admin_required() or _manager_has_permission("can_edit_products"):
+        return None
+    abort(403)
+
+
+def _report_access_response():
+    if not login_required():
+        return redirect(url_for("login"))
+    if admin_required() or _manager_has_permission("can_view_reports"):
+        return None
+    abort(403)
+
+
+def _admin_access_response():
+    if not login_required():
+        return redirect(url_for("login"))
+    if not admin_required():
+        abort(403)
+    return None
+
+
+def _validated_product_payload(form_data):
+    """Normalize a product form payload and reject invalid numeric fields."""
+    product_code = (form_data.get("product_code", "") or "").strip()
+    name = (form_data.get("name", "") or "").strip()
+    if not product_code or not name:
+        raise ValueError("Product code and product name are required.")
+
+    status = (form_data.get("status", "ACTIVE") or "ACTIVE").upper()
+    if status not in {"ACTIVE", "INACTIVE"}:
+        raise ValueError("Product status must be ACTIVE or INACTIVE.")
+
+    def parse_float(field_name, default=0.0):
+        raw = form_data.get(field_name, default)
+        if raw is None or str(raw).strip() == "":
+            return float(default)
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            raise ValueError(f"{field_name.upper()} must be a valid number.") from None
+        if value < 0:
+            raise ValueError(f"{field_name.upper()} cannot be negative.")
+        return value
+
+    def parse_int(field_name, default=0):
+        raw = form_data.get(field_name, default)
+        if raw is None or str(raw).strip() == "":
+            return int(default)
+        try:
+            value = int(float(raw))
+        except (TypeError, ValueError):
+            raise ValueError(f"{field_name.upper()} must be a valid whole number.") from None
+        if value < 0:
+            raise ValueError(f"{field_name.upper()} cannot be negative.")
+        return value
+
+    data = {
+        "product_code": product_code,
+        "name": name,
+        "category": (form_data.get("category", "") or "").strip(),
+        "description": (form_data.get("description", "") or "").strip(),
+        "mrp": parse_float("mrp"),
+        "price": parse_float("price"),
+        "stock": parse_int("stock"),
+        "image_url": (form_data.get("image_url", "") or "").strip(),
+        "status": status,
+    }
+    return data
+
 @app.context_processor
 def inject_globals():
-    return {"logged_user": session.get("name"), "role": session.get("role")}
+    context = {
+        "logged_user": session.get("name"),
+        "role": session.get("role"),
+        "can_edit_products": bool(session.get("can_edit_products")),
+        "can_view_reports": bool(session.get("can_view_reports")),
+        "pending_orders_count": 0,
+        "pending_orders": [],
+    }
+    if session.get("role") == "ADMIN":
+        conn = db()
+        try:
+            pending_status = """UPPER(COALESCE(status,'PENDING')) NOT IN
+                ('COMPLETED','PROCESSING','APPROVED','CONFIRMED','CANCELLED','CANCELED','REJECTED')"""
+            context["pending_orders_count"] = conn.execute(
+                f"SELECT COUNT(*) AS c FROM orders WHERE {pending_status}"
+            ).fetchone()["c"]
+            context["pending_orders"] = conn.execute(
+                f"""SELECT o.id,o.order_number,o.status,o.total_amount,
+                           u.name AS customer_name,
+                           CASE WHEN NULLIF(CAST(o.billing_date AS TEXT),'') IS NOT NULL
+                                THEN CAST(o.billing_date AS DATE)
+                                ELSE CAST(o.order_date AS TIMESTAMP)::date END AS display_date
+                    FROM orders o
+                    JOIN users u ON u.id=o.user_id
+                    WHERE {pending_status.replace('status', 'o.status')}
+                    ORDER BY o.id DESC
+                    LIMIT 10"""
+            ).fetchall()
+        finally:
+            conn.close()
+    return context
 
 def _dashboard_scope(conn):
     """Return dealers visible to the logged-in user/admin."""
@@ -1448,6 +1681,7 @@ def admin_product_targets():
 
     conn = db()
     try:
+        _ensure_user_activation_schema(conn)
         if request.method == "POST":
             categories = request.form.getlist("category")
             values = request.form.getlist("target_pieces")
@@ -1492,7 +1726,331 @@ def admin_product_targets():
             (year, month)
         ).fetchall()
         total_target = sum(int(r["target_pieces"] or 0) for r in rows)
-        return render_template("admin/product_targets.html", rows=rows, year=year, month=month, total_target=total_target)
+        _ensure_monthly_product_targets_table(conn)
+        month_year = f"{year:04d}-{month:02d}"
+        monthly_targets = conn.execute(
+            """SELECT mpt.user_id,mpt.product_id,mpt.target_qty,u.name AS user_name,
+                      p.name AS product_name,p.product_code
+               FROM monthly_product_targets mpt
+               JOIN users u ON u.id=mpt.user_id
+               JOIN products p ON p.id=mpt.product_id
+               WHERE mpt.month_year=?
+               ORDER BY u.name,p.name""",
+            (month_year,)
+        ).fetchall()
+        target_users = conn.execute(
+            "SELECT id,name,user_code FROM users WHERE role='USER' AND is_active=TRUE ORDER BY name"
+        ).fetchall()
+        target_products = conn.execute(
+            "SELECT id,name,product_code FROM products WHERE status='ACTIVE' ORDER BY name"
+        ).fetchall()
+        return render_template(
+            "admin/product_targets.html", rows=rows, year=year, month=month,
+            total_target=total_target, month_year=month_year,
+            monthly_targets=monthly_targets, target_users=target_users,
+            target_products=target_products
+        )
+    finally:
+        conn.close()
+
+
+@app.route("/admin/dealer-targets", methods=["GET", "POST"])
+def dealer_targets():
+    if not admin_required():
+        return redirect(url_for("admin_login"))
+
+    current_month = datetime.now().strftime("%Y-%m")
+    month_year = (request.values.get("month_year") or current_month).strip()
+    if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month_year):
+        abort(400, description="Choose a valid target month.")
+
+    conn = db()
+    try:
+        _ensure_tsst_schema(conn)
+        if request.method == "POST":
+            action = request.form.get("action", "").strip()
+            try:
+                target_id = request.form.get("target_id", type=int)
+                if action == "delete":
+                    if not target_id or target_id < 1:
+                        raise ValueError("Select a valid dealer target to delete.")
+                    conn.execute("DELETE FROM dealer_targets WHERE id=?", (target_id,))
+                    flash("Dealer target record deleted.", "success")
+                elif action in {"add", "update"}:
+                    dealer_name = request.form.get("dealer_name", "").strip()
+                    sap_code = request.form.get("sap_code", "").strip()
+                    if not dealer_name:
+                        raise ValueError("Dealer name is required.")
+                    if len(dealer_name) > 150 or len(sap_code) > 50:
+                        raise ValueError("Dealer name must be 150 characters or fewer and SAP code 50 characters or fewer.")
+                    target_amount = float(request.form.get("target_amount", ""))
+                    achieved_amount = float(request.form.get("achieved_amount", ""))
+                    if (
+                        not math.isfinite(target_amount) or target_amount < 0
+                        or not math.isfinite(achieved_amount) or achieved_amount < 0
+                    ):
+                        raise ValueError("Target and achieved amounts must be valid non-negative numbers.")
+                    if action == "add":
+                        conn.execute(
+                            """INSERT INTO dealer_targets
+                               (dealer_name,sap_code,target_amount,achieved_amount,month_year)
+                               VALUES(?,?,?,?,?)""",
+                            (dealer_name, sap_code, target_amount, achieved_amount, month_year)
+                        )
+                        flash("Dealer target record added.", "success")
+                    else:
+                        if not target_id or target_id < 1:
+                            raise ValueError("Select a valid dealer target to update.")
+                        conn.execute(
+                            """UPDATE dealer_targets
+                               SET dealer_name=?,sap_code=?,target_amount=?,achieved_amount=?,month_year=?
+                               WHERE id=?""",
+                            (dealer_name, sap_code, target_amount, achieved_amount, month_year, target_id)
+                        )
+                        flash("Dealer target record updated.", "success")
+                else:
+                    raise ValueError("Unknown dealer target action.")
+                conn.commit()
+                return redirect(url_for("dealer_targets", month_year=month_year))
+            except ValueError as exc:
+                conn.rollback()
+                flash(str(exc), "danger")
+            except sqlite3.Error:
+                conn.rollback()
+                app.logger.exception("Could not save dealer target")
+                flash("Could not save the dealer target because of a database error.", "danger")
+
+        targets = conn.execute(
+            """SELECT id,dealer_name,sap_code,target_amount,achieved_amount,month_year
+               FROM dealer_targets WHERE month_year=? ORDER BY dealer_name,id""",
+            (month_year,)
+        ).fetchall()
+        return render_template("admin/dealer_targets.html", targets=targets, month_year=month_year)
+    finally:
+        conn.close()
+
+
+@app.route("/admin/tsst-management", methods=["GET", "POST"])
+def tsst_management():
+    if not admin_required():
+        return redirect(url_for("admin_login"))
+
+    now = datetime.now()
+    try:
+        year = int(request.values.get("year", now.year))
+        month = int(request.values.get("month", now.month))
+    except (TypeError, ValueError):
+        abort(400, description="A valid reporting year and month are required.")
+    if not 2020 <= year <= 2100 or not 1 <= month <= 12:
+        abort(400, description="Choose a valid reporting month and year.")
+
+    conn = db()
+    try:
+        _ensure_tsst_schema(conn)
+        if request.method == "POST":
+            action = request.form.get("action", "").strip()
+            try:
+                if action == "metric_delete":
+                    record_id = request.form.get("record_id", type=int)
+                    if not record_id or record_id < 1:
+                        raise ValueError("Select a valid TSST metric record to delete.")
+                    conn.execute("DELETE FROM tsst_management_records WHERE id=?", (record_id,))
+                    flash("TSST metric record deleted.", "success")
+                elif action == "metric_save":
+                    record_id = request.form.get("record_id", type=int)
+                    employee_name = request.form.get("employee_name", "").strip()
+                    emp_code = request.form.get("emp_code", "").strip()
+                    metric_name = request.form.get("metric_name", "").strip()
+                    score = float(request.form.get("score", ""))
+                    metric_date = request.form.get("metric_date", "").strip()
+                    if not employee_name or not metric_name:
+                        raise ValueError("Employee name and metric name are required.")
+                    if len(employee_name) > 150 or len(emp_code) > 50 or len(metric_name) > 100:
+                        raise ValueError("Employee name, code, or metric name exceeds its maximum length.")
+                    if not math.isfinite(score) or score < 0:
+                        raise ValueError("Score must be a valid non-negative number.")
+                    try:
+                        date.fromisoformat(metric_date)
+                    except ValueError:
+                        raise ValueError("Enter a valid metric date.") from None
+                    if record_id:
+                        conn.execute(
+                            """UPDATE tsst_management_records
+                               SET employee_name=?,emp_code=?,metric_name=?,score=?,metric_date=?
+                               WHERE id=?""",
+                            (employee_name, emp_code, metric_name, score, metric_date, record_id)
+                        )
+                        flash("TSST metric record updated.", "success")
+                    else:
+                        conn.execute(
+                            """INSERT INTO tsst_management_records
+                               (employee_name,emp_code,metric_name,score,metric_date)
+                               VALUES(?,?,?,?,?)""",
+                            (employee_name, emp_code, metric_name, score, metric_date)
+                        )
+                        flash("TSST metric record added.", "success")
+                    year, month = date.fromisoformat(metric_date).year, date.fromisoformat(metric_date).month
+                else:
+                    user_id = int(request.form.get("user_id", ""))
+                    user = conn.execute(
+                        "SELECT id FROM users WHERE id=? AND role IN ('USER','MANAGER')",
+                        (user_id,)
+                    ).fetchone()
+                    if not user:
+                        raise ValueError("Select a valid user, ASE, SO, or DSM account.")
+
+                    if action == "designation":
+                        designation = request.form.get("designation", "").strip().upper()
+                        if designation not in {"", "ASE", "SO", "DSM"}:
+                            raise ValueError("Choose a valid TSST designation.")
+                        conn.execute(
+                            "UPDATE users SET tsst_designation=? WHERE id=?",
+                            (designation, user_id)
+                        )
+                        flash("TSST designation updated.", "success")
+                    elif action == "target":
+                        raw_target = request.form.get("target_amount", "").strip()
+                        target_amount = float(raw_target)
+                        if not math.isfinite(target_amount) or target_amount < 0:
+                            raise ValueError("Monthly target must be a valid non-negative amount.")
+                        conn.execute(
+                            """INSERT INTO monthly_targets(user_id,year,month,target_amount)
+                               VALUES(?,?,?,?)
+                               ON CONFLICT(user_id,year,month)
+                               DO UPDATE SET target_amount=EXCLUDED.target_amount""",
+                            (user_id, year, month, target_amount)
+                        )
+                        flash("Monthly sales target saved.", "success")
+                    else:
+                        raise ValueError("Unknown TSST management action.")
+
+                conn.commit()
+                return redirect(url_for("tsst_management", year=year, month=month))
+            except ValueError as exc:
+                conn.rollback()
+                flash(str(exc), "danger")
+            except sqlite3.Error:
+                conn.rollback()
+                app.logger.exception("Could not update TSST management data")
+                flash("Could not save TSST management data because of a database error.", "danger")
+
+        start_date, end_date = _month_bounds(year, month)
+        users = conn.execute(
+            """SELECT u.id,u.name,u.user_code,u.email,u.role,u.is_active,u.tsst_designation,
+                      COALESCE(mt.target_amount,0) AS target_amount,
+                      COALESCE(s.achievement,0) AS achievement
+               FROM users u
+               LEFT JOIN monthly_targets mt
+                 ON mt.user_id=u.id AND mt.year=? AND mt.month=?
+               LEFT JOIN (
+                   SELECT user_id,SUM(total_amount) AS achievement
+                   FROM orders
+                   WHERE status IN ('CONFIRMED','COMPLETED')
+                     AND CAST(order_date AS TIMESTAMP)::date BETWEEN ?::date AND ?::date
+                   GROUP BY user_id
+               ) s ON s.user_id=u.id
+               WHERE u.role IN ('USER','MANAGER')
+               ORDER BY CASE u.tsst_designation WHEN 'DSM' THEN 0 WHEN 'SO' THEN 1 WHEN 'ASE' THEN 2 ELSE 3 END,
+                        u.name""",
+            (year, month, start_date, end_date)
+        ).fetchall()
+        metrics = conn.execute(
+            """SELECT id,employee_name,emp_code,metric_name,score,metric_date
+               FROM tsst_management_records
+               WHERE metric_date BETWEEN ? AND ?
+               ORDER BY metric_date DESC,id DESC""",
+            (start_date, end_date)
+        ).fetchall()
+        report_rows = []
+        for user in users:
+            row = dict(user)
+            row["remaining"] = max(0.0, float(row["target_amount"] or 0) - float(row["achievement"] or 0))
+            row["achievement_percent"] = (
+                float(row["achievement"] or 0) / float(row["target_amount"]) * 100
+                if float(row["target_amount"] or 0) > 0 else 0.0
+            )
+            report_rows.append(row)
+        totals = {
+            "target": sum(float(row["target_amount"] or 0) for row in report_rows),
+            "achievement": sum(float(row["achievement"] or 0) for row in report_rows),
+        }
+        totals["remaining"] = max(0.0, totals["target"] - totals["achievement"])
+        return render_template(
+            "admin/tsst_management.html", users=report_rows, year=year, month=month,
+            month_label=datetime(year, month, 1).strftime("%B %Y"), totals=totals,
+            metrics=metrics
+        )
+    finally:
+        conn.close()
+
+
+def _ensure_monthly_product_targets_table(conn):
+    conn.execute("""CREATE TABLE IF NOT EXISTS monthly_product_targets(
+        user_id INTEGER NOT NULL,
+        product_id INTEGER NOT NULL,
+        month_year TEXT NOT NULL,
+        target_qty INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(user_id, product_id, month_year),
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE
+    )""")
+
+
+@app.route("/admin/targets/save", methods=["POST"])
+def save_monthly_target():
+    if not admin_required():
+        return jsonify({"success": False, "message": "Administrator access is required."}), 403
+
+    payload = request.get_json(silent=True)
+    values = payload if isinstance(payload, dict) else request.form
+    try:
+        user_id = int(values.get("user_id", ""))
+        product_id = int(values.get("product_id", ""))
+        target_raw = values.get("target_qty", "0")
+        target_qty = int(target_raw)
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "message": "User, product and a whole-number target are required."}), 400
+
+    month_year = str(values.get("month_year", "")).strip()
+    if user_id < 1 or product_id < 1:
+        return jsonify({"success": False, "message": "Select a valid user and product."}), 400
+    if target_qty < 0:
+        return jsonify({"success": False, "message": "Target quantity cannot be negative."}), 400
+    if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month_year):
+        return jsonify({"success": False, "message": "Month must use YYYY-MM format."}), 400
+
+    now = datetime.now().isoformat(timespec="seconds")
+    conn = db()
+    try:
+        _ensure_user_activation_schema(conn)
+        _ensure_monthly_product_targets_table(conn)
+        user = conn.execute(
+            "SELECT id FROM users WHERE id=? AND role='USER' AND is_active=TRUE",
+            (user_id,)
+        ).fetchone()
+        product = conn.execute(
+            "SELECT id FROM products WHERE id=?",
+            (product_id,)
+        ).fetchone()
+        if not user or not product:
+            conn.rollback()
+            return jsonify({"success": False, "message": "Active user or product was not found."}), 404
+
+        conn.execute(
+            """INSERT INTO monthly_product_targets(user_id,product_id,month_year,target_qty,created_at,updated_at)
+               VALUES(?,?,?,?,?,?)
+               ON CONFLICT(user_id,product_id,month_year)
+               DO UPDATE SET target_qty=EXCLUDED.target_qty, updated_at=EXCLUDED.updated_at""",
+            (user_id, product_id, month_year, target_qty, now, now)
+        )
+        conn.commit()
+        return jsonify({"success": True, "message": "Monthly product target saved successfully."})
+    except sqlite3.Error:
+        conn.rollback()
+        app.logger.exception("Failed to save monthly product target")
+        return jsonify({"success": False, "message": "Could not save the target because of a database error."}), 500
     finally:
         conn.close()
 
@@ -1726,20 +2284,62 @@ def register():
 from api_routes import api_bp
 app.register_blueprint(api_bp)
 
+@app.route("/api/get-employee-mis/<int:user_id>", methods=["GET"])
+def get_employee_mis(user_id):
+    return _get_employee_code_response(user_id, "mis_code")
+
+
+@app.route("/api/get-employee-code/<int:user_id>", methods=["GET"])
+def get_employee_code(user_id):
+    return _get_employee_code_response(user_id, "employee_code")
+
+
+def _get_employee_code_response(user_id, response_key):
+    if not login_required():
+        return jsonify({"success": False, "message": "Authentication required."}), 401
+    if session.get("role") != "ADMIN" and int(session.get("user_id", 0)) != user_id:
+        return jsonify({"success": False, "message": "You are not allowed to view this employee code."}), 403
+
+    conn = db()
+    try:
+        user = conn.execute(
+            "SELECT user_code FROM users WHERE id=?",
+            (user_id,)
+        ).fetchone()
+        if not user:
+            return jsonify({"success": False, "message": "User not found."}), 404
+        return jsonify({response_key: user["user_code"] or ""})
+    finally:
+        conn.close()
+
+
 @app.route("/login", methods=["GET","POST"])
 def login():
     if request.method == "POST":
         email = request.form.get("username", request.form.get("email", "")).strip().lower()
         password = request.form["password"]
         conn = db()
+        _ensure_user_activation_schema(conn)
         user = conn.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
         conn.close()
         if user and check_password_hash(user["password"], password):
-            session.clear()
-            session.update(user_id=user["id"], name=user["name"], role=user["role"], email=user["email"])
-            if user["role"] == "ADMIN":
-                return redirect(url_for("admin_dashboard"))
-            return redirect(url_for("index"))
+            if not user["is_active"]:
+                flash("Your account is deactivated. Please contact an administrator.", "danger")
+            else:
+                session.clear()
+                session.update(
+                    user_id=user["id"], name=user["name"], role=user["role"], email=user["email"],
+                    can_edit_products=bool(user["can_edit_products"]),
+                    can_view_reports=bool(user["can_view_reports"])
+                )
+                if user["role"] == "ADMIN":
+                    return redirect(url_for("admin_dashboard"))
+                if user["role"] == "MANAGER":
+                    if user["can_edit_products"]:
+                        return redirect(url_for("admin_products"))
+                    if user["can_view_reports"]:
+                        return redirect(url_for("admin_reports"))
+                return redirect(url_for("index"))
         flash("Invalid email or password.", "danger")
     return render_template("login.html", admin=False)
 
@@ -1750,12 +2350,17 @@ def admin_login():
         password = request.form.get("password", "")
         conn = db()
         try:
+            _ensure_user_activation_schema(conn)
             user = conn.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
         finally:
             conn.close()
-        if user and user["role"] == "ADMIN" and check_password_hash(user["password"], password):
+        if user and user["role"] == "ADMIN" and user["is_active"] and check_password_hash(user["password"], password):
             session.clear()
-            session.update(user_id=user["id"], name=user["name"], role=user["role"], email=user["email"])
+            session.update(
+                user_id=user["id"], name=user["name"], role=user["role"], email=user["email"],
+                can_edit_products=bool(user["can_edit_products"]),
+                can_view_reports=bool(user["can_view_reports"])
+            )
             return redirect(url_for("admin_dashboard"))
         flash("Invalid admin email or password.", "danger")
     return render_template("login.html", admin=True)
@@ -2056,10 +2661,13 @@ def admin_beat_names():
                         else:
                             now=datetime.now().isoformat(timespec="seconds")
                             for b in valid:
-                                conn.execute("""INSERT INTO beat_mappings(user_id,dealer_id,beat_name,repeat_days,active,created_at,updated_at)
-                                           VALUES(?,?,?,?,1,?,?)
-                                           ON CONFLICT(user_id,dealer_id,beat_name) DO UPDATE SET repeat_days=EXCLUDED.repeat_days,active=1,updated_at=EXCLUDED.updated_at""",
-                                         (uid,did,b["beat_name"],repeat,now,now))
+                                conn.execute(
+                                    """INSERT INTO beat_mappings(user_id,dealer_id,beat_name,repeat_days,active,created_at,updated_at)
+                                   VALUES(?,?,?,?,1,?,?)
+                                   ON CONFLICT(user_id,dealer_id,beat_name) DO UPDATE SET
+                                     repeat_days=EXCLUDED.repeat_days, active=1, updated_at=EXCLUDED.updated_at""",
+                                (uid, did, b["beat_name"], repeat, now, now)
+                            )
                         conn.commit()
                         flash(f"{len(valid)} beat(s) mapped successfully with a {repeat}-day lock.", "success")
             return redirect(url_for("admin_beat_names"))
@@ -2275,6 +2883,7 @@ def admin_import_beats():
         conn.close()
     return redirect(url_for("admin_beat_names"))
 
+
 @app.route("/admin/pjp/beat/<int:beat_id>/delete", methods=["POST"])
 def admin_delete_beat(beat_id):
     if not admin_required():
@@ -2357,7 +2966,7 @@ def products():
         if session.get('role') == 'ADMIN':
             dealers=conn.execute("SELECT * FROM dealers WHERE active=1 ORDER BY dealer_name").fetchall()
         else:
-            u=conn.execute("SELECT user_code,name FROM users WHERE id=?",(session['user_id'],)).fetchone()
+            u=conn.execute("SELECT user_code,name FROM users WHERE id=?",(session.get('user_id'),)).fetchone()
             dealers=conn.execute("SELECT * FROM dealers WHERE active=1 AND emp_code=? ORDER BY dealer_name",(u['user_code'],)).fetchall() if u and u['user_code'] else (conn.execute("SELECT * FROM dealers WHERE active=1 AND emp_name=? ORDER BY dealer_name",(u['name'],)).fetchall() if u else [])
     else:
         dealers=[]
@@ -2411,8 +3020,7 @@ def product_details(product_id):
             SELECT f.name
             FROM flavors f
             JOIN categories c ON c.id=f.category_id
-            WHERE c.name=?
-            ORDER BY f.name
+            WHERE c.name=? ORDER BY f.name
         """, (product["category"],)).fetchall()
     if not product:
         conn.close()
@@ -2575,8 +3183,8 @@ def checkout():
         # Apply the exact reserved quantities after all validation succeeded.
         for p, qty, line, flavor in selected:
             conn.execute(
-                "INSERT INTO order_items(order_id,product_id,quantity,unit_price,total_price,flavor) VALUES(?,?,?,?,?,?)",
-                (order_id, p["id"], qty, p["price"], line, flavor)
+                "INSERT INTO order_items(order_id,product_id,quantity,unit_price,total_price,flavor,mrp,scheme,discount_amount) VALUES(?,?,?,?,?,?,?,?,?)",
+                (order_id, p["id"], qty, p["price"], line, flavor, p["mrp"], p["scheme"], p["discount_amount"])
             )
             conn.execute(
                 "UPDATE products SET stock=stock-?,updated_at=? WHERE id=?",
@@ -2630,7 +3238,7 @@ def my_order_edit(order_id):
                 if not p: raise ValueError("Selected product is not active.")
                 qty=int(request.form.get("add_quantity","0") or 0); qmin,qstep=quantity_rule_for_product(p["category"],p["brand"],p["name"])
                 if qty<qmin or (qty-qmin)%qstep!=0: raise ValueError(f"Quantity for {p['name']} must be {qmin}, {qmin+qstep}, {qmin+2*qstep}... only.")
-                items.append({"product_id":p["id"],"product_name":p["name"],"product_code":p["product_code"],"brand":p["brand"],"category":p["category"],"flavor":p["flavor"] or "","mrp":float(p["mrp"] or p["price"] or 0),"rate":float(p["price"] or 0),"quantity":qty,"case_size":p["case_size"] or 0,"item_id":None})
+                items.append({"product_id":p["id"],"product_name":p["name"],"product_code":p["product_code"],"brand":p["brand"],"category":p["category"],"flavor":"","mrp":float(p["mrp"] or p["price"] or 0),"rate":float(p["price"] or 0),"quantity":qty,"case_size":p["case_size"] or 0,"item_id":None})
             if not items: raise ValueError("An order must contain at least one product.")
             items,_groups=apply_overall_schemes(conn,items)
             conn.execute("DELETE FROM order_items WHERE order_id=?",(order_id,))
@@ -2766,7 +3374,6 @@ def admin_category_edit(category_id):
                 return redirect(url_for("admin_categories"))
             except sqlite3.IntegrityError:
                 flash("That category name already exists.", "warning")
-
     conn.close()
     return render_template("admin/category_form.html", category=category)
 
@@ -2887,7 +3494,6 @@ def _smr_mapped_dealers(conn):
         return []
     return conn.execute("SELECT * FROM dealers WHERE active=1 AND (emp_code=? OR emp_name=?) ORDER BY dealer_name",
                         (user.get("user_code") or "", user.get("name") or "")).fetchall()
-
 
 def _smr_build_rows(conn, dealer_id):
     products = conn.execute("""
@@ -3103,7 +3709,7 @@ def _build_primary_draft(conn, dealer_id, selected_ids, form):
         qty=int(form.get(f"quantity_{pid}", "0"))
         qty_min,qty_step=quantity_rule_for_product(p['category'],p['brand'],p['name'])
         if qty < qty_min or (qty-qty_min)%qty_step != 0:
-            raise ValueError(f"Quantity for {p['name']} must be {qty_min}, {qty_min+qty_step}, {qty_min+2*qty_step}... only.")
+            raise ValueError(f"Quantity for {p['name']} must be {qty_min}, {qty_min + qty_step}, {qty_min + 2*qty_step}... only.")
         mrp=float(p['mrp'] or p['price'] or 0)
         rate=float(p['price'] or 0)
         items.append({"product_id":pid,"product_name":p['name'],"product_code":p['product_code'],"brand":p['brand'],"category":p['category'],"flavor":"","mrp":mrp,"rate":rate,"quantity":qty,"case_size":p['case_size'] or 0})
@@ -3244,7 +3850,7 @@ def primary_order_review_excel():
         discount_rate,discount_amount,net=calculate_primary_values(rate,scheme)
         case_size=int(item.get('case_size',0) or 0)
         pcs=int(item.get('quantity',0) or 0)
-        cases=item.get('quantity_cases',0) or (pcs/case_size if case_size else 0)
+        cases=round(pcs/cs,4) if cs else 0
         ws.cell(out_row,1).value=f"{item.get('product_name','')}" + (f" - {item.get('product_code')}" if item.get('product_code') else "")
         ws.cell(out_row,2).value=case_size
         ws.cell(out_row,3).value=f"MRP-{float(item.get('mrp',0) or 0):g}"
@@ -3252,7 +3858,7 @@ def primary_order_review_excel():
         ws.cell(out_row,5).value=discount_rate
         ws.cell(out_row,6).value=round(discount_amount,2)
         ws.cell(out_row,7).value=round(net,2)
-        ws.cell(out_row,8).value=round(float(cases),4)
+        ws.cell(out_row,8).value=f'=IF(I{out_row}>0,I{out_row}/B{out_row},"")'
         ws.cell(out_row,9).value=pcs
         ws.cell(out_row,10).value=round(net*pcs,2)
         ws.cell(out_row,4).number_format='0.00'
@@ -3307,7 +3913,7 @@ def _simple_pdf(lines):
     objects.append(b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>')
     pdf=bytearray(b'%PDF-1.4\n'); offsets=[0]
     for n,obj in enumerate(objects,1): offsets.append(len(pdf)); pdf.extend(f'{n} 0 obj\n'.encode()+obj+b'\nendobj\n')
-    xref=len(pdf); pdf.extend(f'xref\n0 {len(objects)+1}\n'.encode()+b'0000000000 65535 f \n'); pdf.extend(''.join(f'{o:010d} 00000 n \n' for o in offsets[1:]).encode()); pdf.extend(f'trailer\n<< /Size {len(objects)+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF'.encode()); return bytes(pdf)
+    xref=len(pdf); pdf.extend(f"xref\n0 {len(objects)+1}\n".encode()+b'0000000000 65535 f \n'); pdf.extend(''.join(f'{o:010d} 00000 n \n' for o in offsets[1:]).encode()); pdf.extend(f"trailer\n<< /Size {len(objects)+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF".encode()); return bytes(pdf)
 
 @app.route("/primary-order/review/export.pdf")
 def primary_order_review_pdf():
@@ -3316,194 +3922,40 @@ def primary_order_review_pdf():
     if not draft or not draft.get('items'): return redirect(url_for('products'))
     lines=['PRIMARY ORDER REVIEW','',f"Dealer: {draft['dealer_name']}",f"Town: {draft['town']}",'','Product | Flavor | MRP | Qty | Scheme | Net | Total','-'*95]
     for i in draft['items']: lines.append(f"{i['product_name'][:24]} | {i.get('flavor','')[:18]} | Rs.{i['mrp']:.2f} | {i['quantity']} | {i['scheme']}% | Rs.{i['net_price']:.2f} | Rs.{i['total_price']:.2f}")
-    lines += ['',f"Final Total: Rs.{sum(i['total_price'] for i in draft['items']):,.2f}",'GP: Not configured','GST: Not configured']
-    return send_file(io.BytesIO(_simple_pdf(lines)),as_attachment=True,download_name='primary_order_review.pdf',mimetype='application/pdf')
-
-@app.route("/products/save-selection", methods=["POST"])
-def products_save_selection():
-    if not login_required():
-        return jsonify({'ok': False, 'error': 'Please log in first.'}), 401
-    dealer_id = (request.form.get('dealer_id') or '').strip()
-    selected_ids = [str(x).strip() for x in request.form.getlist('selected_products') if str(x).strip().isdigit()]
-    conn = db()
-    try:
-        items = {}
-        for pid in selected_ids:
-            p = conn.execute("SELECT id,status FROM products WHERE id=?", (int(pid),)).fetchone()
-            if not p or str(p['status']).upper() != 'ACTIVE':
-                continue
-            try:
-                qty = int(request.form.get(f'quantity_{pid}', '0') or 0)
-            except (TypeError, ValueError):
-                qty = 0
-            if qty > 0:
-                items[str(int(pid))] = qty
-        session['product_selection'] = {'dealer_id': dealer_id, 'items': items}
-        session.modified = True
-        return jsonify({'ok': True, 'count': len(items)})
-    finally:
-        conn.close()
-
-@app.route("/primary-order/from-products", methods=['POST'])
-def primary_order_from_products():
-    if not login_required(): return redirect(url_for('login'))
-    conn=db()
-    try:
-        dealer_id = (request.form.get('dealer_id') or '').strip()
-        selected_ids = [str(x).strip() for x in request.form.getlist('selected_products') if str(x).strip().isdigit()]
-        # Merge the current browser submission with the server-side selection
-        # so products chosen on earlier brand tabs remain in the same order.
-        saved = session.get('product_selection') or {}
-        saved_items = (saved.get('items') or {}) if isinstance(saved,dict) else {}
-        merged = dict(saved_items)
-        for pid in selected_ids:
-            merged[pid] = request.form.get(f'quantity_{pid}', merged.get(pid, '0'))
-        selected_ids = list(merged.keys())
-        if not dealer_id and isinstance(saved,dict):
-            dealer_id = str(saved.get('dealer_id') or '')
-        form_data = request.form.to_dict(flat=True)
-        form_data['dealer_id'] = dealer_id
-        for pid, qty in merged.items():
-            form_data[f'quantity_{pid}'] = qty
-        draft=_build_primary_draft(conn,dealer_id,selected_ids,form_data)
-        session['primary_draft']=draft
-        session.pop('product_selection',None)
-        return redirect(url_for('primary_order_review'))
-    except (ValueError,sqlite3.Error) as e:
-        flash(str(e),'danger'); return redirect(url_for('products',brand=request.form.get('brand','')))
-    finally: conn.close()
-
-@app.route("/primary-order", methods=["GET","POST"])
-def primary_order():
-    if not login_required():
-        return redirect(url_for("login"))
-
-    conn = db()
-    is_admin = session.get("role") == "ADMIN"
-
-    # Only assigned dealers for normal users; admin can see every dealer.
-    if is_admin:
-        dealers = conn.execute("SELECT * FROM dealers WHERE active=1 ORDER BY dealer_name").fetchall()
-    else:
-        user = conn.execute("SELECT user_code,name FROM users WHERE id=?", (session["user_id"],)).fetchone()
-        dealers = conn.execute("SELECT * FROM dealers WHERE active=1 AND emp_code=? ORDER BY dealer_name", (user["user_code"],)).fetchall() if user and user["user_code"] else (conn.execute("SELECT * FROM dealers WHERE active=1 AND emp_name=? ORDER BY dealer_name", (user["name"],)).fetchall() if user else [])
-
-    selected_dealer_id = request.values.get("dealer_id", "")
-    selected_dealer = None
-    if selected_dealer_id:
-        selected_dealer = conn.execute("SELECT * FROM dealers WHERE id=? AND active=1", (selected_dealer_id,)).fetchone()
-        if selected_dealer and not is_admin:
-            user = conn.execute("SELECT user_code,name FROM users WHERE id=?", (session["user_id"],)).fetchone()
-            if not user or (user["user_code"] and selected_dealer["emp_code"] != user["user_code"]) or (not user["user_code"] and selected_dealer["emp_name"] != user["name"]):
-                selected_dealer = None
-
-    seed_nv_scheme_rules(conn)
-
-    # IMPORTANT: Primary Order must display the same Admin-maintained scheme
-    # values from Scheme Adjustment. The old version joined nv_scheme_rules
-    # (per-product legacy rules), which left NV products at 0 because the new
-    # Admin UI stores the authoritative values in nv_scheme_categories.
-    # Build the product rows with the category rule attached so the browser
-    # can calculate the live scheme from quantity.
-    product_rows = conn.execute(
-        "SELECT * FROM products WHERE status='ACTIVE' ORDER BY name"
-    ).fetchall()
-    products = []
-    for row in product_rows:
-        item = dict(row)
-        item["qty_min"], item["qty_step"] = quantity_rule_for_product(item.get("category"), item.get("brand"), item.get("name"))
-        if item.get("brand") in ("ENVY", "Pure Home"):
-            rule = get_nv_scheme(conn, item["id"])
-            if rule:
-                item.update({
-                    "trade_promotion": float(rule["trade_promotion"] or 0),
-                    "slab1_percent": float(rule["slab1_percent"] or 0),
-                    "slab1_cs": float(rule["slab1_cs"] or 0),
-                    "slab2_percent": float(rule["slab2_percent"] or 0),
-                    "slab2_cs": float(rule["slab2_cs"] or 0),
-                    "slab3_percent": float(rule["slab3_percent"] or 0),
-                    "slab3_cs": float(rule["slab3_cs"] or 0),
-                    "slab1_text": rule["slab1_text"] or "",
-                    "slab2_text": rule["slab2_text"] or "",
-                    "slab3_text": rule["slab3_text"] or "",
-                })
-            else:
-                item.update({
-                    "trade_promotion": 0, "slab1_percent": 0, "slab1_cs": 0,
-                    "slab2_percent": 0, "slab2_cs": 0,
-                    "slab3_percent": 0, "slab3_cs": 0,
-                    "slab1_text": "", "slab2_text": "", "slab3_text": "",
-                })
-        products.append(item)
-
-    if request.method == "POST":
-        if not selected_dealer:
-            conn.close(); flash("Select a valid Dealer first.", "warning")
-            return redirect(url_for("primary_order"))
-
-        order_type = request.form.get("order_type", "PRIMARY ORDER").strip() or "PRIMARY ORDER"
-        selected_ids = request.form.getlist("selected_products")
-        if not selected_ids:
-            conn.close(); flash("Select at least one product.", "warning")
-            return redirect(url_for("primary_order", dealer_id=selected_dealer["id"]))
-
-        now = datetime.now().isoformat(timespec="seconds")
-        ref = "PO-" + datetime.now().strftime("%Y%m%d%H%M%S%f")[-12:]
-        valid_items=[]
-        try:
-            draft_items=[]
-            for pid_text in selected_ids:
-                pid=int(pid_text)
-                qty=int(request.form.get(f"quantity_{pid}", "6"))
-                p=conn.execute("SELECT * FROM products WHERE id=? AND status='ACTIVE'",(pid,)).fetchone()
-                if not p:
-                    raise ValueError("Selected product not found.")
-                qty_min, qty_step = quantity_rule_for_product(p["category"], p["brand"], p["name"])
-                if qty < qty_min or qty % qty_step != 0:
-                    raise ValueError(f"Quantity for {p['name']} must be {qty_min}, {qty_min + qty_step}, {qty_min + 2*qty_step}... only.")
-                draft_items.append({"product_id":pid,"product_name":p["name"],"product_code":p["product_code"],"brand":p["brand"],"category":p["category"],"flavor":"","mrp":float(p["mrp"] or p["price"] or 0),"rate":float(p["price"] or 0),"quantity":qty,"case_size":p["case_size"] or 0})
-            draft_items, _=apply_overall_schemes(conn, draft_items)
-            valid_items=[(conn.execute("SELECT * FROM products WHERE id=?",(i["product_id"],)).fetchone(), i["mrp"], i["scheme"], i["net_price"], i["quantity"], i["total_price"]) for i in draft_items]
-
-            total_amount=sum(x[5] for x in valid_items)
-            cur=conn.execute("""INSERT INTO primary_orders(user_id,reference_no,product_id,quantity,notes,status,created_at,dealer_id)
-                               VALUES(?,?,?,?,?,'PENDING',?,?)""",
-                             (session["user_id"],ref,valid_items[0][0]["id"],valid_items[0][4],f"Dealer: {selected_dealer['dealer_name']} | Town: {selected_dealer['town']} | Order: {order_type}",now,selected_dealer["id"]))
-            po_id=cur.lastrowid
-            for p,mrp,scheme,net,qty,total in valid_items:
-                conn.execute("""INSERT INTO primary_order_items(primary_order_id,product_id,mrp,scheme,net_price,quantity,total_price)\n                                VALUES(?,?,?,?,?,?,?)""",(po_id,p["id"],mrp,scheme,net,qty,total))
-            conn.commit()
-            flash(f"Primary Order {ref} created successfully. Total ₹{total_amount:,.2f}", "success")
-        except (ValueError, sqlite3.Error) as e:
-            conn.rollback(); flash(str(e), "danger")
-
-    if is_admin:
-        orders=conn.execute("""
-            SELECT d.dealer_name, d.town,
-                   COUNT(poi.id) AS item_count,
-                   CASE
-                     WHEN SUM(CASE WHEN po.status='PENDING' THEN 1 ELSE 0 END) > 0 THEN 'PENDING'
-                     WHEN SUM(CASE WHEN po.status='REJECTED' THEN 1 ELSE 0 END) > 0 THEN 'REJECTED'
-                     ELSE 'CONFIRMED'
-                   END AS status,
-                   MAX(po.id) AS latest_order_id,
-                   string_agg(po.id::text, ',') AS order_ids
-            FROM primary_orders po
-            JOIN dealers d ON d.id=po.dealer_id
-            LEFT JOIN primary_order_items poi ON poi.primary_order_id=po.id
-            GROUP BY d.id, d.dealer_name, d.town
-            ORDER BY MAX(po.id) DESC
-        """).fetchall()
-    else:
-        orders=conn.execute("""SELECT po.*,u.name customer, d.dealer_name,d.town,
-                              (SELECT COUNT(*) FROM primary_order_items poi WHERE poi.primary_order_id=po.id) item_count
-                              FROM primary_orders po JOIN users u ON u.id=po.user_id
-                              LEFT JOIN dealers d ON d.id=po.dealer_id
-                              WHERE po.user_id=? ORDER BY po.id DESC""",(session["user_id"],)).fetchall()
-
-    conn.close()
-    return render_template("primary_order.html",products=products,dealers=dealers,selected_dealer=selected_dealer,orders=orders,is_admin=is_admin)
-
+    if len(lines)==4: lines.append("No primary orders.")
+    # Build a simple one-page-per-45-lines PDF using standard PDF objects.
+    pages=[lines[i:i+45] for i in range(0,len(lines),45)]
+    objects=[]
+    objects.append(b"<< /Type /Catalog /Pages 2 0 R >>")
+    page_obj_ids=[]
+    # Reserve pages tree object as object 2; pages/content objects follow.
+    next_id=3
+    for page_lines in pages:
+        page_id=next_id; content_id=next_id+1; next_id+=2
+        page_obj_ids.append((page_id,content_id,page_lines))
+    kids=" ".join(f"{pid} 0 R" for pid,_,_ in page_obj_ids)
+    objects.append(f"<< /Type /Pages /Kids [{kids}] /Count {len(page_obj_ids)} >>".encode())
+    for page_id,content_id,page_lines in page_obj_ids:
+        objects.append(f'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 842 595] /Resources << /Font << /F1 {next_id} 0 R >> >> /Contents {content_id} 0 R >>'.encode())
+        stream=["BT /F1 9 Tf 35 560 Td 12 TL"]
+        for line in page_lines:
+            safe=line.replace('\\','\\\\').replace('(','\\(').replace(')','\\)')
+            stream.append(f"({safe}) Tj T*")
+        stream.append("ET")
+        data="\n".join(stream).encode("latin-1","replace")
+        objects.append(f"<< /Length {len(data)} >>\nstream\n".encode()+data+b"\nendstream")
+    font_id=next_id
+    objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+    # Reorder object numbers: first two are catalog/pages, then each page/content, font last.
+    # The object list currently follows exactly that numbering.
+    pdf=bytearray(b"%PDF-1.4\n")
+    offsets=[0]
+    for i,obj in enumerate(objects,1):
+        offsets.append(len(pdf)); pdf.extend(f"{i} 0 obj\n".encode()); pdf.extend(obj); pdf.extend(b"\nendobj\n")
+    xref=len(pdf); pdf.extend(f"xref\n0 {len(objects)+1}\n".encode()); pdf.extend(b"0000000000 65535 f \n")
+    for off in offsets[1:]: pdf.extend(f"{off:010d} 00000 n \n".encode())
+    pdf.extend(f"trailer\n<< /Size {len(objects)+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF".encode())
+    return send_file(io.BytesIO(pdf),as_attachment=True,download_name="primary_order_history.pdf",mimetype="application/pdf")
 
 # ---------------- ADMIN-ONLY PRIMARY ORDER HISTORY CONTROLS ----------------
 
@@ -3775,16 +4227,16 @@ def admin_primary_orders_pdf():
         page_id=next_id; content_id=next_id+1; next_id+=2
         page_obj_ids.append((page_id,content_id,page_lines))
     kids=" ".join(f"{pid} 0 R" for pid,_,_ in page_obj_ids)
-    objects.append(f"<< /Type /Pages /Kids [{kids}] /Count {len(page_obj_ids)} >>".encode())
+    objects.append(f'<< /Type /Pages /Kids [{kids}] /Count {len(page_obj_ids)} >>'.encode())
     for page_id,content_id,page_lines in page_obj_ids:
-        objects.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 842 595] /Resources << /Font << /F1 {next_id} 0 R >> >> /Contents {content_id} 0 R >>".encode())
+        objects.append(f'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 842 595] /Resources << /Font << /F1 {next_id} 0 R >> >> /Contents {content_id} 0 R >>'.encode())
         stream=["BT /F1 9 Tf 35 560 Td 12 TL"]
         for line in page_lines:
             safe=line.replace('\\','\\\\').replace('(','\\(').replace(')','\\)')
             stream.append(f"({safe}) Tj T*")
         stream.append("ET")
         data="\n".join(stream).encode("latin-1","replace")
-        objects.append(f"<< /Length {len(data)} >>\nstream\n".encode()+data+b"\nendstream")
+        objects.append(f'<< /Length {len(data)} >>\nstream\n'.encode()+data+b'\nendstream')
     font_id=next_id
     objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
     # Reorder object numbers: first two are catalog/pages, then each page/content, font last.
@@ -3851,14 +4303,24 @@ def scheme_adjustment():
 
 # ---------------- ADMIN ----------------
 
+@app.route("/admin/home")
+def admin_home():
+    if not login_required():
+        return redirect(url_for("login"))
+    if not admin_required():
+        abort(403)
+    return redirect(url_for("admin_dashboard"))
+
+
 @app.route("/admin/dashboard")
 def admin_dashboard():
     if not admin_required():
         return redirect(url_for("admin_login"))
+    selected_date=(request.args.get("date") or datetime.now().strftime("%Y-%m-%d")).strip()
     conn = db()
     stats = {
         "products": conn.execute("SELECT COUNT(*) c FROM products").fetchone()["c"],
-        "users": conn.execute("SELECT COUNT(*) c FROM users WHERE role='USER'").fetchone()["c"],
+        "users": conn.execute("SELECT COUNT(*) c FROM users WHERE role IN ('USER','MANAGER')").fetchone()["c"],
         "orders": conn.execute("SELECT COUNT(*) c FROM orders").fetchone()["c"],
         "sales": conn.execute("SELECT COALESCE(SUM(total_amount),0) s FROM orders WHERE status IN ('CONFIRMED','COMPLETED')").fetchone()["s"],
     }
@@ -3869,16 +4331,37 @@ def admin_dashboard():
         ORDER BY month
     """).fetchall()
     recent = conn.execute("""
-        SELECT o.*, u.name customer FROM orders o
+        SELECT o.*, u.name customer, u.email,
+               d.dealer_name, d.town,
+               COALESCE(o.order_type,'SALES ORDER') AS display_type,
+               CASE WHEN o.status IN ('COMPLETED','PROCESSING','APPROVED','CONFIRMED') THEN 'CONFIRMED' WHEN o.status IN ('CANCELLED','REJECTED','CANCELED') THEN 'CANCELED' ELSE 'PENDING' END AS display_status,
+               (SELECT string_agg(
+                    p.name || ' × ' || oi.quantity ||
+                    ' | MRP ₹' || to_char(COALESCE(oi.mrp,p.mrp,p.price), 'FM9999999990.00') ||
+                    ' | Rate ₹' || to_char(oi.unit_price, 'FM9999999990.00') ||
+                    ' | Scheme ' || COALESCE(oi.scheme,'0') || '%' ||
+                    ' | Net ₹' || to_char(oi.unit_price, 'FM9999999990.00') ||
+                    ' | Total ₹' || to_char(oi.total_price, 'FM9999999990.00'),
+                    ' || '
+                )
+                FROM order_items oi JOIN products p ON p.id=oi.product_id
+                WHERE oi.order_id=o.id) AS product_summary,
+               CASE WHEN NULLIF(CAST(o.billing_date AS TEXT),'') IS NOT NULL
+                    THEN CAST(o.billing_date AS DATE)
+                    ELSE CAST(o.order_date AS TIMESTAMP)::date END AS display_date
+        FROM orders o
         JOIN users u ON u.id=o.user_id
-        ORDER BY o.id DESC LIMIT 8
-    """).fetchall()
+        LEFT JOIN dealers d ON d.id=o.dealer_id
+       WHERE (CASE WHEN NULLIF(CAST(o.billing_date AS TEXT),'') IS NOT NULL THEN CAST(o.billing_date AS DATE) ELSE CAST(o.order_date AS TIMESTAMP)::date END) = ?::date
+        ORDER BY o.id DESC
+    """, (selected_date,)).fetchall()
     conn.close()
-    return render_template("admin/dashboard.html", stats=stats, monthly=monthly, recent=recent)
+    return render_template("admin/dashboard.html", stats=stats, monthly=monthly, recent=recent, selected_date=selected_date)
 
 @app.route("/admin/products")
 def admin_products():
-    if not admin_required(): return redirect(url_for("admin_login"))
+    access_response = _product_edit_access_response()
+    if access_response: return access_response
     status = request.args.get("status", "ALL").upper()
     if status not in {"ACTIVE", "INACTIVE", "ALL"}:
         status = "ALL"
@@ -3903,12 +4386,13 @@ def admin_products():
         rows=conn.execute(sql, tuple(params)).fetchall()
     finally:
         conn.close()
-    return render_template("admin/products.html", products=rows, product_status=status, selected_brand=brand, brands=brands)
+    return render_template("admin/products.html", products=rows, product_status=status, selected_brand=brand, brands=brands,
+                           can_edit_products=True)
 
 @app.route("/admin/products/<int:product_id>/mrp", methods=["POST"])
 def admin_product_mrp(product_id):
-    if not admin_required():
-        return redirect(url_for("admin_login"))
+    access_response = _product_edit_access_response()
+    if access_response: return access_response
     try:
         mrp = float(request.form.get("mrp", "0") or 0)
         if mrp < 0:
@@ -3932,7 +4416,8 @@ def admin_product_mrp(product_id):
 
 @app.route("/admin/products/<int:product_id>/status", methods=["POST"])
 def admin_product_status(product_id):
-    if not admin_required(): return redirect(url_for("admin_login"))
+    access_response = _product_edit_access_response()
+    if access_response: return access_response
     status = request.form.get("status", "").upper()
     if status not in {"ACTIVE", "INACTIVE"}:
         flash("Invalid product status.", "danger")
@@ -3949,53 +4434,132 @@ def admin_product_status(product_id):
 
 @app.route("/admin/products/new", methods=["GET","POST"])
 def admin_product_new():
-    if not admin_required(): return redirect(url_for("admin_login"))
+    access_response = _admin_access_response()
+    if access_response: return access_response
     if request.method=="POST":
-        data=[request.form.get("product_code","").strip(),request.form.get("name","").strip(),
-              request.form.get("category","").strip(),request.form.get("description","").strip(),
-              float(request.form.get("mrp",0) or 0),float(request.form.get("price",0) or 0),int(request.form.get("stock",0) or 0),
-              request.form.get("image_url","").strip(),request.form.get("status","ACTIVE")]
+        try:
+            data = _validated_product_payload(request.form)
+        except ValueError as exc:
+            flash(str(exc), "danger")
+            return render_template("admin/product_form.html", product={**request.form.to_dict(), "status": (request.form.get("status", "ACTIVE") or "ACTIVE").upper()})
         now=datetime.now().isoformat(timespec="seconds")
         conn=db()
         try:
             conn.execute("""INSERT INTO products(product_code,name,category,description,mrp,price,stock,image_url,status,created_at,updated_at)
-                            VALUES(?,?,?,?,?,?,?,?,?,?,?)""",(*data,now,now))
+                            VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                         (data["product_code"], data["name"], data["category"], data["description"],
+                          data["mrp"], data["price"], data["stock"], data["image_url"], data["status"], now, now))
             conn.commit(); flash("Product added successfully.","success"); return redirect(url_for("admin_products"))
         except sqlite3.IntegrityError:
-            flash("Product code already exists.","danger")
-        finally: conn.close()
+            conn.rollback(); flash("Product code already exists.","danger")
+        finally:
+            conn.close()
     return render_template("admin/product_form.html", product=None)
 
 @app.route("/admin/products/<int:product_id>/edit", methods=["GET","POST"])
 def admin_product_edit(product_id):
-    if not admin_required(): return redirect(url_for("admin_login"))
+    access_response = _product_edit_access_response()
+    if access_response: return access_response
     conn=db(); product=conn.execute("SELECT * FROM products WHERE id=?",(product_id,)).fetchone(); conn.close()
     if not product: return redirect(url_for("admin_products"))
     if request.method=="POST":
+        try:
+            payload = _validated_product_payload(request.form)
+        except ValueError as exc:
+            flash(str(exc), "danger")
+            return render_template("admin/product_form.html", product={**request.form.to_dict(), "status": (request.form.get("status", "ACTIVE") or "ACTIVE").upper()})
         now=datetime.now().isoformat(timespec="seconds")
         conn=db()
-        conn.execute("""UPDATE products SET product_code=?,name=?,category=?,description=?,mrp=?,price=?,stock=?,image_url=?,status=?,updated_at=?
-                        WHERE id=?""",
-                     (request.form["product_code"].strip(),request.form["name"].strip(),request.form.get("category","").strip(),
-                      request.form.get("description","").strip(),float(request.form.get("mrp",0) or 0),float(request.form.get("price",0) or 0),
-                      int(request.form.get("stock",0) or 0),request.form.get("image_url","").strip(),
-                      request.form.get("status","ACTIVE"),now,product_id))
-        conn.commit(); conn.close()
-        flash("Product updated successfully.","success")
-        return redirect(url_for("admin_products"))
+        try:
+            conn.execute("""UPDATE products SET product_code=?,name=?,category=?,description=?,mrp=?,price=?,stock=?,image_url=?,status=?,updated_at=?
+                            WHERE id=?""",
+                         (payload["product_code"], payload["name"], payload["category"], payload["description"],
+                          payload["mrp"], payload["price"], payload["stock"], payload["image_url"],
+                          payload["status"], now, product_id))
+            conn.commit()
+            flash("Product updated successfully.","success")
+            return redirect(url_for("admin_products"))
+        except Exception:
+            conn.rollback(); raise
+        finally:
+            conn.close()
     return render_template("admin/product_form.html", product=product)
 
 @app.route("/admin/products/<int:product_id>/delete", methods=["POST"])
+@app.route("/admin/products/delete/<int:product_id>", methods=["POST"])
 def admin_product_delete(product_id):
-    if not admin_required(): return redirect(url_for("admin_login"))
+    access_response = _admin_access_response()
+    if access_response: return access_response
     conn=db()
     try:
         conn.execute("DELETE FROM products WHERE id=?",(product_id,)); conn.commit()
         flash("Product deleted.","success")
     except sqlite3.IntegrityError:
-        flash("This product has sales history and cannot be deleted. Set it to INACTIVE instead.","warning")
+        conn.rollback()
+        conn.execute("UPDATE products SET status='INACTIVE', updated_at=? WHERE id=?",
+                     (datetime.now().isoformat(timespec="seconds"), product_id))
+        conn.commit()
+        flash("This product has related records and was set to INACTIVE instead.","warning")
     finally: conn.close()
     return redirect(url_for("admin_products"))
+
+@app.route("/admin/products/bulk-action", methods=["POST"])
+def admin_product_bulk_action():
+    access_response = _admin_access_response()
+    if access_response:
+        status_code = 401 if not login_required() else 403
+        return jsonify({"success": False, "message": "Product editing permission is required."}), status_code
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"success": False, "message": "A JSON request body is required."}), 400
+
+    action = data.get("action")
+    if action not in {"delete", "inactive"}:
+        return jsonify({"success": False, "message": "Choose delete or inactive."}), 400
+
+    raw_ids = data.get("ids")
+    if not isinstance(raw_ids, list) or not raw_ids:
+        return jsonify({"success": False, "message": "Select at least one product."}), 400
+
+    product_ids = []
+    for value in raw_ids:
+        if isinstance(value, bool):
+            return jsonify({"success": False, "message": "Product IDs must be positive integers."}), 400
+        try:
+            product_id = int(value)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "message": "Product IDs must be positive integers."}), 400
+        if product_id < 1 or str(product_id) != str(value).strip():
+            return jsonify({"success": False, "message": "Product IDs must be positive integers."}), 400
+        if product_id not in product_ids:
+            product_ids.append(product_id)
+
+    placeholders = ",".join(["?"] * len(product_ids))
+    conn = db()
+    try:
+        if action == "delete":
+            result = conn.execute(f"DELETE FROM products WHERE id IN ({placeholders})", tuple(product_ids))
+        else:
+            result = conn.execute(
+                f"UPDATE products SET status='INACTIVE', updated_at=? WHERE id IN ({placeholders})",
+                tuple([datetime.now().isoformat(timespec="seconds"), *product_ids])
+            )
+        affected = result.rowcount
+        conn.commit()
+        return jsonify({
+            "success": True,
+            "message": f"{affected} product(s) processed.",
+            "processed": affected,
+        })
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        return jsonify({
+            "success": False,
+            "message": "Some selected products have related records and cannot be deleted. Choose inactive instead.",
+        }), 409
+    finally:
+        conn.close()
 
 def _profile_image_data(file_storage):
     if not file_storage or not file_storage.filename:
@@ -4014,6 +4578,7 @@ def admin_users():
         return redirect(url_for("admin_login"))
     conn=db()
     try:
+        _ensure_user_activation_schema(conn)
         if request.method=="POST":
             action=request.form.get("action","add").strip().lower()
             if action=="edit_name":
@@ -4033,7 +4598,7 @@ def admin_users():
             code=request.form.get("user_code","").strip().upper() or email.split("@",1)[0].upper()
             if not name or not email or not password:
                 raise ValueError("Name, email and password are required.")
-            if role not in ("USER","ADMIN"):
+            if role not in ("USER","MANAGER","ADMIN"):
                 raise ValueError("Invalid role selected.")
             if len(password)<8:
                 raise ValueError("Password must contain at least 8 characters.")
@@ -4050,9 +4615,111 @@ def admin_users():
         conn.rollback(); flash("Email or User Code already exists.","danger")
     except Exception as e:
         conn.rollback(); flash(str(e),"danger")
-    users=conn.execute("SELECT id,name,user_code,email,role,created_at FROM users ORDER BY id DESC").fetchall()
+    users=conn.execute("SELECT id,name,user_code,email,role,created_at,is_active FROM users ORDER BY id DESC").fetchall()
+    active_admin_count=conn.execute(
+        "SELECT COUNT(*) AS count FROM users WHERE role='ADMIN' AND is_active=TRUE"
+    ).fetchone()["count"]
     conn.close()
-    return render_template("admin/users.html",users=users)
+    return render_template("admin/users.html",users=users,active_admin_count=active_admin_count)
+
+
+@app.route("/admin/managers", methods=["GET", "POST"])
+def manage_managers():
+    if not admin_required():
+        if not login_required():
+            return redirect(url_for("login"))
+        abort(403)
+
+    conn = db()
+    try:
+        _ensure_user_activation_schema(conn)
+        if request.method == "POST":
+            manager_id = request.form.get("manager_id", type=int)
+            if not manager_id:
+                flash("Select a valid manager.", "danger")
+            else:
+                manager = conn.execute(
+                    "SELECT id FROM users WHERE id=? AND role='MANAGER'",
+                    (manager_id,)
+                ).fetchone()
+                if not manager:
+                    flash("Manager account not found.", "warning")
+                else:
+                    can_edit_products = "can_edit_products" in request.form
+                    can_view_reports = "can_view_reports" in request.form
+                    conn.execute(
+                        """UPDATE users
+                           SET can_edit_products=?, can_view_reports=?
+                           WHERE id=? AND role='MANAGER'""",
+                        (can_edit_products, can_view_reports, manager_id)
+                    )
+                    conn.commit()
+                    flash("Manager permissions updated.", "success")
+                    return redirect(url_for("manage_managers"))
+
+        managers = conn.execute(
+            """SELECT id,name,email,user_code,is_active,can_edit_products,can_view_reports
+               FROM users WHERE role='MANAGER' ORDER BY name"""
+        ).fetchall()
+        return render_template("admin/managers.html", managers=managers)
+    finally:
+        conn.close()
+
+
+@app.route("/admin/user/toggle/<int:user_id>", methods=["POST"])
+def toggle_user(user_id):
+    if not admin_required():
+        if request.is_json:
+            return jsonify({"success": False, "message": "Administrator access is required."}), 403
+        return redirect(url_for("admin_login"))
+
+    conn = db()
+    try:
+        _ensure_user_activation_schema(conn)
+        user = conn.execute("SELECT id, role, is_active FROM users WHERE id=?", (user_id,)).fetchone()
+        if not user:
+            message = "User not found."
+            status_code = 404
+            success = False
+        elif int(user["id"]) == int(session.get("user_id", 0)):
+            message = "You cannot deactivate your own account."
+            status_code = 400
+            success = False
+            is_active = bool(user["is_active"])
+        elif user["role"] == "ADMIN" and user["is_active"]:
+            active_admins = conn.execute(
+                "SELECT COUNT(*) AS count FROM users WHERE role='ADMIN' AND is_active=TRUE"
+            ).fetchone()["count"]
+            if active_admins <= 1:
+                message = "At least one active admin account must remain."
+                status_code = 400
+                success = False
+                is_active = True
+            else:
+                conn.execute(
+                    "UPDATE users SET is_active=FALSE WHERE id=?",
+                    (user_id,)
+                )
+                conn.commit()
+                message = "User account deactivated."
+                status_code = 200
+                success = True
+                is_active = False
+        else:
+            new_status = not bool(user["is_active"])
+            conn.execute("UPDATE users SET is_active=? WHERE id=?", (new_status, user_id))
+            conn.commit()
+            message = "User account activated." if new_status else "User account deactivated."
+            status_code = 200
+            success = True
+            is_active = new_status
+
+        if request.is_json:
+            return jsonify({"success": success, "is_active": is_active if user else None, "message": message}), status_code
+        flash(message, "success" if success else "warning")
+        return redirect(url_for("admin_users"))
+    finally:
+        conn.close()
 
 
 @app.route("/admin/dealers", methods=["GET","POST"])
@@ -4112,6 +4779,7 @@ def admin_orders():
                 )
                 FROM order_items oi JOIN products p ON p.id=oi.product_id
                 WHERE oi.order_id=o.id) AS product_summary,
+               (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id=o.id) AS items_count,
                CASE WHEN NULLIF(CAST(o.billing_date AS TEXT),'') IS NOT NULL
                     THEN CAST(o.billing_date AS DATE)
                     ELSE CAST(o.order_date AS TIMESTAMP)::date END AS display_date
@@ -4121,17 +4789,18 @@ def admin_orders():
        WHERE (CASE WHEN NULLIF(CAST(o.billing_date AS TEXT),'') IS NOT NULL THEN CAST(o.billing_date AS DATE) ELSE CAST(o.order_date AS TIMESTAMP)::date END) = ?::date
         ORDER BY o.id DESC
     """, (selected_date,)).fetchall()
+    pending_orders_count = sum(1 for order in orders if order["display_status"] == "PENDING")
     conn.close()
-    return render_template("admin/orders.html", orders=orders, selected_date=selected_date)
+    return render_template("admin/orders.html", orders=orders, selected_date=selected_date, pending_orders_count=pending_orders_count)
 
 @app.route("/admin/orders/<int:order_id>/status", methods=["POST"])
 def admin_order_status(order_id):
     if not admin_required(): return redirect(url_for("admin_login"))
     status=normalize_order_status(request.form.get("status","PENDING")); conn=db()
     row=conn.execute("SELECT id FROM orders WHERE id=?",(order_id,)).fetchone()
-    if not row: conn.close(); flash("Order not found.","danger"); return redirect(url_for("admin_orders"))
+    if not row: conn.close(); flash("Order not found.","danger"); return redirect(url_for("admin_orders",date=request.form.get("date") or None))
     conn.execute("UPDATE orders SET status=? WHERE id=?",(status,order_id)); sync_primary_order_from_order(conn,order_id); conn.commit(); conn.close()
-    flash(f"Order status updated to {status}.","success"); return redirect(url_for("admin_orders"))
+    flash(f"Order status updated to {status}.","success"); return redirect(url_for("admin_orders",date=request.form.get("date") or None))
 
 @app.route("/my-orders/<int:order_id>/export.xlsx")
 def my_order_excel(order_id):
@@ -4153,7 +4822,8 @@ def admin_order_excel(order_id):
 
 @app.route("/admin/sales")
 def admin_sales():
-    if not admin_required(): return redirect(url_for("admin_login"))
+    access_response = _report_access_response()
+    if access_response: return access_response
     conn=db()
     product_sales=conn.execute("""
         SELECT p.name, SUM(oi.quantity) qty, SUM(oi.total_price) sales
@@ -4205,7 +4875,8 @@ ORDER BY 1
 
 @app.route("/admin/reports", methods=["GET","POST"])
 def admin_reports():
-    if not admin_required(): return redirect(url_for("admin_login"))
+    access_response = _report_access_response()
+    if access_response: return access_response
     year=int(request.values.get("year",datetime.now().year))
     conn=db()
     rows=conn.execute("""
@@ -4226,14 +4897,16 @@ ORDER BY 1
 
 @app.route("/admin/reports/download")
 def admin_report_download():
-    if not admin_required(): return redirect(url_for("admin_login"))
+    access_response = _report_access_response()
+    if access_response: return access_response
     year=int(request.args.get("year",datetime.now().year))
     path=build_report(year)
     return send_file(path,as_attachment=True,download_name=os.path.basename(path))
 
 @app.route("/admin/import", methods=["GET","POST"])
 def admin_import():
-    if not admin_required(): return redirect(url_for("admin_login"))
+    if not admin_required():
+        return redirect(url_for("admin_login"))
     preview=None; headers=[]
     if request.method=="POST":
         file=request.files.get("file")
@@ -4255,7 +4928,8 @@ def admin_import():
 
 @app.route("/admin/import/confirm", methods=["POST"])
 def admin_import_confirm():
-    if not admin_required(): return redirect(url_for("admin_login"))
+    if not admin_required():
+        return redirect(url_for("admin_login"))
     path=session.get("import_file")
     if not path or not os.path.exists(path):
         flash("No uploaded file is ready for import.","danger"); return redirect(url_for("admin_import"))
@@ -4281,7 +4955,7 @@ def admin_import_confirm():
         avg=int(round(sum(numeric)/len(numeric)))
         try:
             conn.execute("""INSERT INTO products(product_code,name,category,description,price,stock,image_url,status,created_at,updated_at)
-                            VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                            VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                          (code,name,"Imported","Imported from SMR SALF.xlsx",0,avg,"","ACTIVE",now,now))
             imported += 1
         except sqlite3.IntegrityError: pass
