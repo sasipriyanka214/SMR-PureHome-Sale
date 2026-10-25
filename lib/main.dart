@@ -13,7 +13,7 @@ class SmrPureHomeApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'SMR PureHome',
+      title: 'SMR Sales',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1565C0)),
         useMaterial3: true,
@@ -171,14 +171,7 @@ class _WebsiteScreenState extends State<WebsiteScreen> {
     final hasUrl = _websiteUrl?.isNotEmpty == true;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('SMR PureHome'),
-        actions: [
-          IconButton(
-            tooltip: 'Change website address',
-            onPressed: _showServerAddressDialog,
-            icon: const Icon(Icons.settings),
-          ),
-        ],
+        title: const Text('SMR Sales'),
       ),
       body: Column(
         children: [
