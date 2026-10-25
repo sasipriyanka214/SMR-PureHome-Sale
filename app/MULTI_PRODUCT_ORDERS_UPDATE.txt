@@ -1,0 +1,6 @@
+SMR PureHome FINAL update:
+- Orders page date filtering no longer casts empty billing dates to date.
+- Multi-brand product selection is persisted server-side and browser-side.
+- ENVY + Pure Home + Venisa products can be combined into one Primary Order.
+- Existing Admin product Active/Inactive status is preserved by catalogue upserts.
+- Admin MRP save route is included.

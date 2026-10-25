@@ -1,0 +1,6 @@
+{% extends "admin/base_admin.html" %}{% block title %}Sales{% endblock %}
+{% block admin_content %}<h2 class="mb-4">Sales Analytics</h2>
+<div class="row g-4"><div class="col-lg-7"><div class="panel"><h5>Monthly Sales</h5><canvas id="monthly"></canvas></div></div><div class="col-lg-5"><div class="panel"><h5>Top Products</h5><div class="table-responsive"><table class="table"><thead><tr><th>Product</th><th>Qty</th><th>Sales</th></tr></thead><tbody>{% for p in product_sales %}<tr><td>{{p.name}}</td><td>{{p.qty}}</td><td>₹{{"%.0f"|format(p.sales)}}</td></tr>{% endfor %}</tbody></table></div></div></div></div>
+{% endblock %}{% block scripts %}<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script><script>
+new Chart(document.getElementById('monthly'),{type:'bar',data:{labels:{{monthly|map(attribute='month')|list|tojson}},datasets:[{label:'Sales ₹',data:{{monthly|map(attribute='sales')|list|tojson}}}]},options:{responsive:true}});
+</script>{% endblock %}

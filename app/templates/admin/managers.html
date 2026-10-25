@@ -1,0 +1,43 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Manager Access Portal{% endblock %}
+{% block admin_content %}
+<div class="mb-4">
+  <h2 class="mb-1">Manager Access Portal</h2>
+  <p class="text-muted mb-0">Grant managers permission to edit products or view reports.</p>
+</div>
+<div class="panel table-responsive">
+  <table class="table align-middle mb-0">
+    <thead>
+      <tr>
+        <th>Manager</th>
+        <th>Email</th>
+        <th>Account</th>
+        <th>Product Editing</th>
+        <th>Reports</th>
+        <th>Save</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for manager in managers %}
+      <tr>
+        <td>
+          <form id="manager-access-{{manager.id}}" method="post" action="{{url_for('manage_managers')}}">
+            <input type="hidden" name="manager_id" value="{{manager.id}}">
+          </form>
+          <strong>{{manager.name}}</strong>{% if manager.user_code %}<br><small class="text-muted">{{manager.user_code}}</small>{% endif %}
+        </td>
+        <td>{{manager.email}}</td>
+        <td><span class="badge {{'bg-success' if manager.is_active else 'bg-secondary'}}">{{'Active' if manager.is_active else 'Inactive'}}</span></td>
+        <td>
+          <label class="form-check-label"><input class="form-check-input me-1" type="checkbox" name="can_edit_products" form="manager-access-{{manager.id}}" {% if manager.can_edit_products %}checked{% endif %}> Can edit products</label>
+        </td>
+        <td><label class="form-check-label"><input class="form-check-input me-1" type="checkbox" name="can_view_reports" form="manager-access-{{manager.id}}" {% if manager.can_view_reports %}checked{% endif %}> Can view reports</label></td>
+        <td><button class="btn btn-sm btn-primary" type="submit" form="manager-access-{{manager.id}}">Save Access</button></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="text-center text-muted py-4">No manager accounts yet. Create one from Users &amp; Access.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

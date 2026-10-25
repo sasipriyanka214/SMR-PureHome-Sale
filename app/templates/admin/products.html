@@ -1,0 +1,147 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Products{% endblock %}
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
+  <div><h2 class="mb-1">Products</h2><p class="text-muted mb-0">Select a brand to manage its products, or use Active / Inactive / All for the complete catalogue.</p></div>
+  {% if role == 'ADMIN' %}
+  <a class="btn btn-success" href="{{url_for('admin_product_new')}}">+ Add Product</a>
+  {% endif %}
+</div>
+
+<div class="row g-3 mb-4">
+  {% for b in brands %}
+  <div class="col-6 col-md-3 col-xl-2">
+    <a class="text-decoration-none" href="{{url_for('admin_products', brand=b.brand)}}">
+      <div class="brand-box {% if selected_brand==b.brand %}brand-box-active{% endif %}">
+        <div class="brand-box-icon">📦</div>
+        <div class="fw-bold">{{b.brand}}</div>
+        <small class="text-muted">{{b.product_count}} products</small>
+      </div>
+    </a>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+  <a class="btn {{ 'btn-primary' if product_status=='ACTIVE' and not selected_brand else 'btn-outline-primary' }}" href="{{ url_for('admin_products', status='ACTIVE') }}">Active</a>
+  <a class="btn {{ 'btn-warning' if product_status=='INACTIVE' and not selected_brand else 'btn-outline-warning' }}" href="{{ url_for('admin_products', status='INACTIVE') }}">Inactive</a>
+  <a class="btn {{ 'btn-dark' if product_status=='ALL' and not selected_brand else 'btn-outline-dark' }}" href="{{ url_for('admin_products', status='ALL') }}">All</a>
+  {% if selected_brand %}
+    <span class="badge text-bg-light border fs-6">Brand: {{selected_brand}}</span>
+    <a class="btn btn-sm btn-outline-secondary" href="{{url_for('admin_products')}}">Show All Brands</a>
+  {% endif %}
+</div>
+
+{% if role == 'ADMIN' %}
+<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+  <select class="form-select" id="bulk-product-action" style="max-width: 200px" aria-label="Bulk product action">
+    <option value="">Bulk action...</option>
+    <option value="inactive">Set inactive</option>
+    <option value="delete">Delete</option>
+  </select>
+  <button class="btn btn-outline-danger" id="apply-bulk-product-action" type="button">Apply to selected</button>
+</div>
+{% endif %}
+
+<div class="panel table-responsive product-table-scroll">
+<table class="table table-striped align-middle">
+<thead><tr>{% if role == 'ADMIN' %}<th><input type="checkbox" id="select-all-products" aria-label="Select all products"></th>{% endif %}<th>Code</th><th>Product</th><th>Brand</th><th>Category</th><th>MRP</th><th>Price</th><th>Stock</th><th>Status</th><th>Actions</th></tr></thead>
+<tbody>
+{% for p in products %}
+<tr>
+{% if role == 'ADMIN' %}
+<td><input type="checkbox" class="product-selection" value="{{p.id}}" aria-label="Select {{p.name}}"></td>
+{% endif %}
+<td>{{p.product_code}}</td>
+<td><b>{{p.name}}</b></td>
+<td>{{p.brand or '-'}}</td>
+<td>{{p.category}}</td>
+<td>
+  <form method="post" action="{{url_for('admin_product_mrp',product_id=p.id)}}" class="d-flex gap-1 align-items-center">
+    <input type="hidden" name="filter" value="{{product_status}}">
+    <input type="hidden" name="brand" value="{{selected_brand}}">
+    <input class="form-control form-control-sm" style="width:105px" type="number" step="0.01" min="0" name="mrp" value="{{p.mrp or 0}}">
+    <button class="btn btn-sm btn-outline-primary" type="submit">Save</button>
+  </form>
+</td>
+<td>₹{{"%.2f"|format(p.price or 0)}}</td>
+<td>{{p.stock}}</td>
+<td><span class="badge {{'bg-success' if p.status=='ACTIVE' else 'bg-secondary'}}">{{p.status}}</span></td>
+<td class="product-actions">
+  <form class="d-inline" method="post" action="{{url_for('admin_product_status',product_id=p.id, filter=product_status, brand=selected_brand)}}">
+    <input type="hidden" name="status" value="ACTIVE"><button class="btn btn-sm {{ 'btn-success' if p.status=='ACTIVE' else 'btn-outline-success' }}" {% if p.status=='ACTIVE' %}disabled{% endif %}>Active</button>
+  </form>
+  <form class="d-inline" method="post" action="{{url_for('admin_product_status',product_id=p.id, filter=product_status, brand=selected_brand)}}">
+    <input type="hidden" name="status" value="INACTIVE"><button class="btn btn-sm {{ 'btn-secondary' if p.status=='INACTIVE' else 'btn-outline-secondary' }}" {% if p.status=='INACTIVE' %}disabled{% endif %}>Inactive</button>
+  </form>
+  <a class="btn btn-sm btn-outline-primary" href="{{url_for('admin_product_edit',product_id=p.id)}}">Edit</a>
+  {% if role == 'ADMIN' %}
+  <form class="d-inline" method="post" action="{{url_for('admin_product_delete',product_id=p.id)}}" onsubmit="return confirm('Delete this product?')"><button class="btn btn-sm btn-outline-danger">Delete</button></form>
+  {% endif %}
+</td>
+</tr>
+{% else %}
+<tr><td colspan="{{10 if role == 'ADMIN' else 9}}" class="text-center text-muted py-4">No products found.</td></tr>
+{% endfor %}
+</tbody></table></div>
+
+{% if role == 'ADMIN' %}
+<script>
+(() => {
+  const selectAll = document.getElementById("select-all-products");
+  const selections = () => Array.from(document.querySelectorAll(".product-selection"));
+  const actionSelect = document.getElementById("bulk-product-action");
+  const applyButton = document.getElementById("apply-bulk-product-action");
+
+  selectAll?.addEventListener("change", () => {
+    selections().forEach((checkbox) => { checkbox.checked = selectAll.checked; });
+  });
+
+  applyButton?.addEventListener("click", async () => {
+    const action = actionSelect.value;
+    const ids = selections().filter((checkbox) => checkbox.checked).map((checkbox) => Number(checkbox.value));
+    if (!action) {
+      window.alert("Choose a bulk action first.");
+      return;
+    }
+    if (ids.length === 0) {
+      window.alert("Select at least one product.");
+      return;
+    }
+    if (action === "delete" && !window.confirm(`Delete ${ids.length} selected product(s)? Products with related records will be kept and reported.`)) {
+      return;
+    }
+
+    applyButton.disabled = true;
+    try {
+      const response = await fetch("{{ url_for('admin_product_bulk_action') }}", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, ids })
+      });
+      const result = await response.json();
+      window.alert(result.message || "Bulk action failed.");
+      if (response.ok && result.success) {
+        window.location.reload();
+      }
+    } catch (error) {
+      window.alert("Could not complete the bulk action. Please try again.");
+    } finally {
+      applyButton.disabled = false;
+    }
+  });
+})();
+</script>
+{% endif %}
+
+<style>
+.brand-box{height:120px;background:#fff;border:1px solid #dfe6ee;border-radius:14px;padding:18px;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;box-shadow:0 3px 12px rgba(20,40,60,.05);transition:.15s}
+.brand-box:hover{transform:translateY(-2px);border-color:#1d72f2}.brand-box-active{border:2px solid #1d72f2;background:#f2f7ff}.brand-box-icon{font-size:24px;margin-bottom:4px}
+.product-table-scroll{max-height:70vh;overflow-y:auto;overflow-x:auto;position:relative}
+.product-table-scroll thead th{position:sticky;top:0;z-index:10;background-color:#fff;box-shadow:inset 0 -2px 0 #dee2e6}
+@media (max-width:768px){
+  .product-table-scroll .table td,.product-table-scroll .table th{white-space:nowrap}
+  .product-table-scroll .btn{padding:.25rem .5rem;font-size:.85rem}
+}
+</style>
+{% endblock %}

@@ -1,0 +1,18 @@
+SMR PureHome – Final PJP / Beat / Product Target Update
+
+Implemented:
+1. Beat Master imports the supplied Beat - AP.xlsx (218 records, 7 employee codes) without creating or renaming users/dealers.
+2. Admin -> PJP Management -> Beat Data:
+   User/TSI -> mapped existing Dealer -> multiple Beat selection -> Admin lock days (7/15/30/45/60) -> Save.
+3. Dealer choices are filtered to dealers already mapped to the selected user.
+4. Beat choices are filtered to Beat Master records for the selected user.
+5. Saved mappings store the Admin lock/repeat days.
+6. User PJP page uses Dealer -> Beat selection and shows only assigned mappings.
+7. Beat availability uses the Admin-defined repeat interval and reports last selected / next available when blocked.
+8. Existing PJP Excel export, month/year selection, and PJP target display remain.
+9. Product Targets are month-wise, in Pieces, Admin-editable; Home shows Target, Achieved, Remaining, Achieved %, Required per Day.
+10. The supplied current-month Product Target example is seeded only when the current month has no product targets; existing targets are never overwritten.
+11. Existing Admin account name is preserved; if a fresh database creates the default admin, it uses MIS09438 / Chebrolu Naga Vijaykumar.
+12. Existing Orders navigation/routes are preserved.
+
+The supplied Beat - AP.xlsx is bundled at data_files/Beat - AP.xlsx.

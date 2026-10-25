@@ -1,0 +1,76 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Categories{% endblock %}
+{% block admin_content %}
+<div class="mb-4">
+  <h2>Categories & Flavors</h2>
+  <p class="small text-success"><b>Deo No Gas</b> catalogue added from the supplied sheet.</p>
+  <p class="text-muted">Admin-only management of categories and the flavors under each category.</p>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-4">
+    <div class="panel">
+      <h5>+ Add Category</h5>
+      <p class="small text-muted">Examples: Room Fresheners, Perfumes, Deodorants.</p>
+      <form method="post">
+        <label>Category Name</label>
+        <input class="form-control mb-3" name="name" placeholder="e.g. Room Fresheners" required>
+        <label>Description</label>
+        <textarea class="form-control mb-3" name="description" rows="3" placeholder="Category description"></textarea>
+        <button class="btn btn-success w-100">+ Add Category</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="col-lg-8">
+    <div class="panel">
+      <h5>Category Structure</h5>
+
+      {% for c in categories %}
+      <div class="category-tree-card mb-3">
+        <div class="d-flex justify-content-between align-items-start gap-2">
+          <div>
+            <div class="category-title">📁 {{ c.name }}</div>
+            {% if c.description %}<div class="small text-muted">{{ c.description }}</div>{% endif %}
+            <div class="small text-muted mt-1">{{ c.product_count }} product(s) · {{ c.flavors|length }} flavor(s)</div>
+          </div>
+          <div class="text-nowrap">
+            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin_category_edit', category_id=c.id) }}">Edit</a>
+            <form class="d-inline" method="post" action="{{ url_for('admin_category_delete', category_id=c.id) }}" onsubmit="return confirm('Delete this category and its flavors?')">
+              <button class="btn btn-sm btn-outline-danger" {% if c.product_count > 0 %}disabled{% endif %}>Delete</button>
+            </form>
+          </div>
+        </div>
+
+        <div class="flavor-tree">
+          {% for f in c.flavors %}
+          <div class="flavor-row">
+            <span>└── {{ f.name }}</span>
+            <span>
+              <a class="btn btn-sm btn-link" href="{{ url_for('admin_flavor_edit', flavor_id=f.id) }}">Edit</a>
+              <form class="d-inline" method="post" action="{{ url_for('admin_flavor_delete', flavor_id=f.id) }}" onsubmit="return confirm('Delete this flavor?')">
+                <button class="btn btn-sm btn-link text-danger">Delete</button>
+              </form>
+            </span>
+          </div>
+          {% else %}
+          <div class="flavor-empty">No flavors added yet.</div>
+          {% endfor %}
+        </div>
+
+        <div class="add-flavor-box mt-3">
+          <strong>+ Add Flavor to {{ c.name }}</strong>
+          <form method="post" action="{{ url_for('admin_flavor_add', category_id=c.id) }}" class="row g-2 mt-1">
+            <div class="col-md-5"><input class="form-control" name="name" placeholder="e.g. Lavender" required></div>
+            <div class="col-md-5"><input class="form-control" name="description" placeholder="Optional description"></div>
+            <div class="col-md-2"><button class="btn btn-success w-100">Add</button></div>
+          </form>
+        </div>
+      </div>
+      {% else %}
+      <div class="text-center py-5 text-muted">No categories yet. Add your first category.</div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

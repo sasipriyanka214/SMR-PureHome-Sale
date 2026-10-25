@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Edit Primary Order{% endblock %}
+{% block content %}
+<div class="container py-4"><div class="panel">
+<div class="d-flex justify-content-between align-items-center mb-3"><div><h3 class="mb-1">Edit Primary Order</h3><div class="text-muted">{{order.dealer_name}} · {{order.town}}</div></div><a class="btn btn-outline-secondary" href="{{url_for('primary_order')}}">Back</a></div>
+<form method="post" id="editPrimaryForm"><div class="table-responsive"><table class="table align-middle"><thead><tr><th>Product</th><th>MRP</th><th>Scheme</th><th>Net Price</th><th>Quantity</th><th>Total Price</th></tr></thead><tbody>
+{% for i in items %}<tr><td><input type="hidden" name="item_id" value="{{i.id}}"><b>{{i.product_name}}</b><div class="small text-muted">{{i.product_code}}</div></td><td><input class="form-control" value="{{i.mrp}}" type="number" min="0" step="0.01" readonly aria-readonly="true" title="MRP is fixed and cannot be edited"><div class="small text-muted">Locked</div></td><td><input class="form-control" value="{{i.scheme}}%" readonly title="ENVY scheme is calculated automatically from quantity"><div class="small text-muted">Automatic</div></td><td><input class="form-control net-edit" name="net_price_{{i.id}}" value="{{i.net_price}}" type="number" min="0" step="0.01" readonly title="Calculated from Rate and Scheme"></td><td><input class="form-control qty" name="quantity_{{i.id}}" value="{{i.quantity}}" type="number" min="{{i.qty_min}}" step="{{i.qty_step}}" data-step="{{i.qty_step}}" required></td><td>₹{{"%.2f"|format(i.total_price)}}</td></tr>{% endfor %}
+</tbody></table></div><button class="btn btn-success px-5" type="submit">Save Changes</button></form>
+</div></div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById('editPrimaryForm')?.addEventListener('submit',e=>{
+  if([...document.querySelectorAll('.qty')].some(x=>{const step=Number(x.dataset.step)||12; return Number(x.value)<step||Number(x.value)%step!==0;})){e.preventDefault();alert('Please use the minimum quantity and +step defined for the product category.');}
+});
+</script>
+{% endblock %}

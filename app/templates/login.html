@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="google-site-verification" content="oedcvmpUKh6g0Yat9B6_vVaCLvqBChU_qJTDHP9H7ZY">
+<title>ENVY — {{ 'Admin' if admin else 'User' }} Login</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#050509;font-family:Segoe UI,Arial,sans-serif;color:#fff}
+.login-scene{position:fixed;inset:0;overflow:hidden;background:#050509}
+.login-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center center;display:block;z-index:0}
+.scene-shade{position:absolute;inset:0;background:linear-gradient(90deg,rgba(0,0,0,.02),rgba(0,0,0,.10));z-index:1;pointer-events:none}
+
+/* The form is a REAL Flask form. It is never part of the video. */
+.login-panel{position:absolute;z-index:10;right:5.5vw;top:50%;width:min(450px,35vw);min-width:370px;transform:translateY(-46%) translateY(24px);opacity:0;visibility:visible;pointer-events:none;padding:34px 38px 30px;border-radius:24px;background:rgba(10,11,16,.94);border:1px solid rgba(255,255,255,.15);box-shadow:0 28px 80px rgba(0,0,0,.60),0 0 45px rgba(235,25,40,.12);backdrop-filter:blur(10px);transition:opacity .35s ease,transform .35s ease}
+/* CSS fallback: the login must appear even if a browser blocks/interrupts the video JS event. */
+.login-panel{animation:loginReveal .35s ease .3s forwards}
+@keyframes loginReveal{from{opacity:0;transform:translateY(-46%) translateY(24px);pointer-events:none}to{opacity:1;transform:translateY(-50%);pointer-events:auto}}
+.login-panel.show{opacity:1;visibility:visible;pointer-events:auto;transform:translateY(-50%);animation:none;transition:opacity .35s ease,transform .35s ease}
+
+.role-title{text-align:center;font-size:11px;letter-spacing:2.5px;color:#9ca3af;font-weight:800;margin:0 0 9px}
+.login-brand{text-align:center;margin:-10px 0 12px}
+.login-brand img{width:68px;height:68px;object-fit:cover;border-radius:10px}
+.role-switch{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:24px;padding:5px;border-radius:13px;background:rgba(255,255,255,.07)}
+.role-switch button{height:46px;border:0;border-radius:10px;background:transparent;color:#aeb5c1;font-size:14px;font-weight:800;cursor:pointer;transition:.2s}
+.role-switch button.active{background:#fff;color:#15161b;box-shadow:0 5px 18px rgba(0,0,0,.25)}
+.role-switch button:focus-visible{outline:2px solid #ef2330;outline-offset:2px}
+
+.eyebrow{font-size:11px;letter-spacing:3px;font-weight:900;color:#ff3340;margin-bottom:8px}
+h1{font-size:34px;line-height:1.1;margin:0 0 8px;font-weight:800}h1 span{color:#ef2330}
+.subtitle{margin:0 0 25px;color:#a7adba;font-size:14px}
+.field{margin-bottom:17px}.field label{display:block;margin:0 0 8px;font-size:13px;font-weight:700;color:#e8e9ec}
+.input{width:100%;height:52px;border-radius:11px;border:1px solid #343945;background:#080a0f;color:#fff;padding:0 15px;font-size:15px;outline:none}
+.input::placeholder{color:#69717f}.input:focus{border-color:#ef2330;box-shadow:0 0 0 3px rgba(239,35,48,.14)}
+.options{display:flex;justify-content:space-between;align-items:center;margin:2px 0 21px;color:#8f97a5;font-size:12px}.remember{display:flex;align-items:center;gap:7px}.remember input{accent-color:#ef2330}
+.login-btn{width:100%;height:54px;border:0;border-radius:11px;background:linear-gradient(135deg,#e51f2a,#ff3944);color:#fff;font-size:16px;font-weight:900;cursor:pointer;box-shadow:0 12px 28px rgba(229,31,42,.25)}
+.login-btn:hover{filter:brightness(1.06)}
+.footer-note{text-align:center;color:#69717e;font-size:10px;margin-top:18px;letter-spacing:1.2px}
+
+.loading{position:absolute;z-index:4;left:50%;bottom:22px;transform:translateX(-50%);font-size:10px;letter-spacing:2px;color:rgba(255,255,255,.40);transition:opacity .5s}.loading.hide{opacity:0}
+.flash-area{position:absolute;z-index:20;top:20px;right:20px;width:min(390px,90vw)}
+.flash{padding:12px 15px;margin-bottom:8px;border-radius:10px;background:rgba(15,16,21,.96);border:1px solid rgba(255,255,255,.14);font-size:13px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+.flash.danger{border-color:rgba(255,70,80,.6)}.flash.success{border-color:rgba(80,220,140,.6)}
+
+@media(max-width:1000px){.login-panel{right:3vw;width:min(420px,43vw);min-width:340px}}
+@media(max-width:760px){
+ html,body{overflow:auto}.login-scene{min-height:100vh;position:relative}
+ .login-video{object-position:45% center}.scene-shade{background:rgba(0,0,0,.28)}
+ .login-panel{left:50%;right:auto;top:50%;width:min(92vw,430px);min-width:0;padding:28px 25px;transform:translate(-50%,-46%) translateY(20px)}
+ .login-panel.show{transform:translate(-50%,-50%)}h1{font-size:29px}
+}
+</style>
+</head>
+<body>
+<div class="login-scene">
+    <video id="loginVideo" class="login-video" autoplay muted playsinline preload="auto">
+        <source src="{{ url_for('static', filename='videos/envy-login.mp4') }}" type="video/mp4">
+    </video>
+    <div class="scene-shade"></div>
+
+    <div class="flash-area">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+            <div class="flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+    {% endwith %}
+    </div>
+
+    <div id="loading" class="loading">ENVY • PREPARING SECURE LOGIN</div>
+
+    <section id="loginPanel" class="login-panel" aria-hidden="true">
+        <div class="login-brand"><img src="{{ url_for('static', filename='images/smr-sales-logo.png') }}" alt="SMR Sales App"></div>
+        <div class="role-title">SELECT LOGIN TYPE</div>
+        <div class="role-switch" role="tablist" aria-label="Login type">
+            <button id="userTab" type="button" role="tab" aria-selected="true" onclick="setRole('user')">👤 USER</button>
+            <button id="adminTab" type="button" role="tab" aria-selected="false" onclick="setRole('admin')">🛡 ADMIN</button>
+        </div>
+
+        <div class="eyebrow" id="eyebrow">SECURE ACCESS</div>
+        <h1>Welcome to <span>ENVY</span></h1>
+        <p class="subtitle">Sign in to continue to your Sales Management System.</p>
+
+        <form id="loginForm" method="post" action="{{ url_for('admin_login') if admin else url_for('login') }}" autocomplete="on">
+            <div class="field">
+                <label for="username">Username</label>
+                <input id="username" class="input" type="text" name="username" placeholder="Enter your username" autocomplete="username" required>
+            </div>
+            <div class="field">
+                <label for="password">Password</label>
+                <input id="password" class="input" type="password" name="password" placeholder="Enter your password" autocomplete="current-password" required>
+            </div>
+            <div class="options">
+                <label class="remember"><input type="checkbox" name="remember"> Remember me</label>
+                <span>Secure Login</span>
+            </div>
+            <button class="login-btn" type="submit">LOGIN →</button>
+        </form>
+        <div class="footer-note">SECURE • SIMPLE • PROFESSIONAL</div>
+    </section>
+</div>
+
+<script>
+const video=document.getElementById('loginVideo');
+const panel=document.getElementById('loginPanel');
+const loading=document.getElementById('loading');
+const form=document.getElementById('loginForm');
+const userTab=document.getElementById('userTab');
+const adminTab=document.getElementById('adminTab');
+let revealed=false;
+
+function revealLogin(){
+    if(revealed)return;
+    revealed=true;
+    panel.classList.add('show');
+    panel.setAttribute('aria-hidden','false');
+    loading.classList.add('hide');
+    setTimeout(()=>document.getElementById('username').focus(),750);
+}
+
+/* Keep login available while the background video continues playing. */
+video.addEventListener('ended',revealLogin);
+video.addEventListener('error',revealLogin);
+
+video.play().catch(()=>{
+    /* If autoplay is blocked, never leave the user without a usable form. */
+    revealLogin();
+});
+
+/* Show the form promptly even if the video takes time to load. */
+setTimeout(()=>{
+    revealLogin();
+},350);
+
+function setRole(role){
+    const isAdmin=role==='admin';
+    userTab.classList.toggle('active',!isAdmin);
+    adminTab.classList.toggle('active',isAdmin);
+    userTab.setAttribute('aria-selected',String(!isAdmin));
+    adminTab.setAttribute('aria-selected',String(isAdmin));
+    document.getElementById('eyebrow').textContent=isAdmin?'ADMIN ACCESS':'SECURE ACCESS';
+    form.action=isAdmin?"{{ url_for('admin_login') }}":"{{ url_for('login') }}";
+    document.title=isAdmin?'ENVY — Admin Login':'ENVY — User Login';
+}
+
+setRole({{ '"admin"' if admin else '"user"' }});
+</script>
+</body>
+</html>

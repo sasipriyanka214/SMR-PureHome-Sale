@@ -1,7 +1,47 @@
+# Sensitive business data and backups
+*.xls
+*.xlsx
+*.xlsm
+*.xlsb
+*.csv
+**/data_files/
+**/SS_BACKUP_DATA/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Python runtime artifacts
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+app/reports/
+app/uploads/
+*.db
+*.sqlite
+*.sqlite3
+
+# JavaScript dependencies and build output
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Dart and Flutter generated files
 .dart_tool/
+.packages
 .flutter-plugins
 .flutter-plugins-dependencies
-.packages
 .pub-cache/
+.dart_frog/
 build/
 coverage/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini

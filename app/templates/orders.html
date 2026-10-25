@@ -1,0 +1,22 @@
+{% extends "base.html" %}{% block title %}Orders{% endblock %}
+{% block content %}
+<div class="container py-5">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div><h2>Orders</h2><p class="text-muted mb-0">Your orders for the selected billing date.</p></div>
+    <a class="btn btn-success" href="{{url_for('products', reset=1)}}">+ New Primary Order</a>
+  </div>
+  <form class="row g-2 mt-4" method="get">
+    <div class="col-sm-5 col-md-3"><label class="form-label mb-0 small">Billing Date</label><input class="form-control" type="date" name="date" value="{{selected_date}}" onchange="this.form.submit()"></div>
+    <div class="col-sm-5 col-md-3"><label class="form-label mb-0 small">Status</label><select class="form-select" name="status" onchange="this.form.submit()"><option value="">All</option>{% for s in ['PENDING','CONFIRMED','CANCELED'] %}<option value="{{s}}" {% if status==s %}selected{% endif %}>{{'CANCELLED' if s=='CANCELED' else s}}</option>{% endfor %}</select></div>
+    <div class="col-sm-2 col-md-2 d-flex align-items-end"><a class="btn btn-outline-secondary w-100" href="{{url_for('my_orders')}}">Today</a></div>
+  </form>
+  <div class="table-responsive mt-3"><table class="table table-hover align-middle">
+    <thead><tr><th>Order</th><th>Type</th><th>Dealer</th><th>Billing Date</th><th>Total</th><th>Status</th><th>Actions</th></tr></thead>
+    <tbody>
+    {% for o in orders %}
+      <tr><td><b>{{o.order_number}}</b></td><td><span class="badge {% if o.order_type=='PRIMARY ORDER' %}bg-primary{% else %}bg-secondary{% endif %}">{{o.order_type or 'SALES ORDER'}}</span></td><td>{{o.dealer_name or '-'}}</td><td>{{o.display_date or ''}}</td><td><b>₹{{"%.2f"|format(o.total_amount)}}</b></td><td><span class="badge {% if o.display_status=='CONFIRMED' %}bg-success{% elif o.display_status=='CANCELED' %}bg-danger{% else %}bg-warning text-dark{% endif %}">{{'CANCELLED' if o.display_status=='CANCELED' else o.display_status}}</span></td><td class="d-flex gap-1 flex-wrap">{% if o.display_status=='PENDING' %}<a class="btn btn-sm btn-outline-primary" href="{{url_for('my_order_edit',order_id=o.id)}}">Edit</a>{% endif %}<a class="btn btn-sm btn-outline-secondary" href="{{url_for('order_details',order_id=o.id)}}">Details</a><a class="btn btn-sm btn-outline-success" href="{{url_for('my_order_excel',order_id=o.id)}}">Excel</a></td></tr>
+    {% else %}<tr><td colspan="7" class="text-center py-5">No orders for {{selected_date}}.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endblock %}

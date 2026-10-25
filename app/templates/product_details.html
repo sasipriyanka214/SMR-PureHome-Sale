@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}{{product.name}}{% endblock %}
+{% block content %}
+<div class="container py-5">
+  <div class="row g-5 align-items-start">
+    <div class="col-md-5"><div class="detail-img">{{product.name[:1]}}</div></div>
+    <div class="col-md-7">
+      <span class="badge bg-light text-dark">{{product.category}}</span>
+      <h1 class="mt-2">{{product.name}}</h1>
+      <p class="text-muted">{{product.description}}</p>
+      <p>Product Code: <b>{{product.product_code}}</b></p>
+
+      <div class="product-spec-grid">
+        <div><span>GM/ML</span><strong>{{product.gm_ml or '-'}}</strong></div>
+        <div><span>MRP</span><strong>₹{{"%.0f"|format(product.mrp if product.mrp else product.price)}}</strong></div>
+        <div><span>Case Size</span><strong>{{product.case_size or '-'}}</strong></div>
+        <div><span>Available Stock</span><strong>{{product.stock}}</strong></div>
+      </div>
+
+      {% if scheme %}
+      <div class="mt-3 p-3 rounded bg-light border">
+        <div class="fw-bold mb-1">Automatic Scheme</div>
+        <div>Trade Promotion: <b>{{"%.2f"|format(scheme.trade_promotion or 0)}}%</b></div>
+        {% if scheme.slab1_cs %}<div>Slab 1: <b>{{"%.2f"|format(scheme.slab1_percent)}}%</b> on {{scheme.slab1_cs|int if scheme.slab1_cs==scheme.slab1_cs|int else scheme.slab1_cs}} CS</div>{% endif %}
+        {% if scheme.slab2_cs %}<div>Slab 2: <b>{{"%.2f"|format(scheme.slab2_percent)}}%</b> on {{scheme.slab2_cs|int if scheme.slab2_cs==scheme.slab2_cs|int else scheme.slab2_cs}} CS</div>{% endif %}
+        {% if scheme.slab3_cs %}<div>Slab 3: <b>{{"%.2f"|format(scheme.slab3_percent)}}%</b> on {{scheme.slab3_cs|int if scheme.slab3_cs==scheme.slab3_cs|int else scheme.slab3_cs}} CS</div>{% endif %}
+      </div>
+      {% endif %}
+      <form method="post" action="{{url_for('add_cart',product_id=product.id)}}" class="mt-4">
+
+        <label class="form-label fw-bold">Quantity</label>
+        <div class="d-flex gap-2 align-items-center">
+          <input class="form-control" style="max-width:130px" type="number" name="quantity"
+                 value="{{qty_min}}" min="{{qty_min}}" max="{{product.stock}}" step="{{qty_step}}" required>
+          <button class="btn btn-success btn-lg" {% if product.stock < 12 %}disabled{% endif %}>
+            Add to Cart
+          </button>
+        </div>
+        <div class="form-text">Minimum order quantity: <b>{{qty_min}}</b>. Add only in <b>+{{qty_step}}</b> quantities.</div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

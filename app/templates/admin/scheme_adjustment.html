@@ -1,0 +1,88 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Scheme Adjustment{% endblock %}
+{% block admin_content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h2 class="mb-1">Brand Scheme Adjustment</h2>
+    <p class="text-muted mb-0">Admin-only. Margin is removed. Select a brand and edit Trade Promotion / Scheme Slabs.</p>
+  </div>
+</div>
+
+<div class="panel mb-4">
+  <div class="d-flex gap-2 mb-3 flex-wrap" id="brandTabs">
+    <button type="button" class="btn btn-outline-primary brand-tab active" data-brand="ENVY">ENVY</button>
+    <button type="button" class="btn btn-outline-success brand-tab" data-brand="Pure Home">Pure Home</button>
+  </div>
+
+  <form method="post" class="row g-3" id="schemeForm">
+    <input type="hidden" name="brand" id="schemeBrand" value="ENVY">
+    <div class="col-md-5">
+      <label class="form-label">Category</label>
+      <select class="form-select" name="category_name" id="schemeCategory" required>
+        {% for c in categories %}
+        <option value="{{ c.category_name }}" data-brand="{{ c.brand or 'ENVY' }}">{{ c.category_name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2"><label class="form-label">Trade Promotion %</label><input class="form-control" name="trade_promotion" type="number" step="0.01" min="0" max="100" required></div>
+    <div class="col-md-2"><label class="form-label">Slab 1 %</label><input class="form-control" name="slab1_percent" type="number" step="0.01" min="0" max="100"></div>
+    <div class="col-md-2"><label class="form-label">Slab 1 CS</label><input class="form-control" name="slab1_cs" type="number" step="0.01" min="0"></div>
+    <div class="col-md-2"><label class="form-label">Slab 2 %</label><input class="form-control" name="slab2_percent" type="number" step="0.01" min="0" max="100"></div>
+    <div class="col-md-2"><label class="form-label">Slab 2 CS</label><input class="form-control" name="slab2_cs" type="number" step="0.01" min="0"></div>
+    <div class="col-md-2"><label class="form-label">Slab 3 %</label><input class="form-control" name="slab3_percent" type="number" step="0.01" min="0" max="100"></div>
+    <div class="col-md-2"><label class="form-label">Slab 3 CS</label><input class="form-control" name="slab3_cs" type="number" step="0.01" min="0"></div>
+    <div class="col-md-2 d-flex align-items-end"><button class="btn btn-success w-100">Save Scheme</button></div>
+  </form>
+  <div class="small text-muted mt-3">CS = Case Quantity. Below Slab 1, Trade Promotion is used. When the quantity reaches a slab threshold, the highest eligible slab applies automatically.</div>
+</div>
+
+<div class="panel table-responsive">
+<table class="table align-middle">
+<thead><tr><th>Brand</th><th>Category</th><th>Trade Promotion</th><th>Scheme Slab 1</th><th>Scheme Slab 2</th><th>Scheme Slab 3</th></tr></thead>
+<tbody>
+{% for r in rows %}
+<tr data-row-brand="{{ r.brand or 'ENVY' }}">
+  <td><span class="badge {% if r.brand=='Pure Home' %}bg-success{% else %}bg-primary{% endif %}">{{ r.brand or 'ENVY' }}</span></td>
+  <td><b>{{ r.category_name }}</b></td>
+  <td>{{ "%.2f"|format(r.trade_promotion or 0) }}%</td>
+  <td>{% if r.slab1_cs %}{{ "%.2f"|format(r.slab1_percent or 0) }}% on {{ r.slab1_cs|int if r.slab1_cs == r.slab1_cs|int else r.slab1_cs }} CS{% else %}-{% endif %}</td>
+  <td>{% if r.slab2_cs %}{{ "%.2f"|format(r.slab2_percent or 0) }}% on {{ r.slab2_cs|int if r.slab2_cs == r.slab2_cs|int else r.slab2_cs }} CS{% else %}-{% endif %}</td>
+  <td>{% if r.slab3_cs %}{{ "%.2f"|format(r.slab3_percent or 0) }}% on {{ r.slab3_cs|int if r.slab3_cs == r.slab3_cs|int else r.slab3_cs }} CS{% else %}-{% endif %}</td>
+</tr>
+{% else %}<tr><td colspan="6" class="text-center">No scheme categories found.</td></tr>{% endfor %}
+</tbody>
+</table>
+</div>
+
+<script>
+const rules = {{ rows|tojson }};
+const sel = document.getElementById('schemeCategory');
+const form = document.getElementById('schemeForm');
+const brandInput = document.getElementById('schemeBrand');
+const tabs = [...document.querySelectorAll('.brand-tab')];
+const tableRows = [...document.querySelectorAll('tbody tr[data-row-brand]')];
+function loadRule(){
+  const r = rules.find(x => x.category_name === sel.value && (x.brand || 'ENVY') === brandInput.value);
+  if(!r) return;
+  form.trade_promotion.value = r.trade_promotion ?? 0;
+  form.slab1_percent.value = r.slab1_percent ?? 0;
+  form.slab1_cs.value = r.slab1_cs ?? 0;
+  form.slab2_percent.value = r.slab2_percent ?? 0;
+  form.slab2_cs.value = r.slab2_cs ?? 0;
+  form.slab3_percent.value = r.slab3_percent ?? 0;
+  form.slab3_cs.value = r.slab3_cs ?? 0;
+}
+function selectBrand(brand){
+  brandInput.value = brand;
+  tabs.forEach(t=>t.classList.toggle('active', t.dataset.brand===brand));
+  [...sel.options].forEach(o=>o.hidden=(o.dataset.brand||'ENVY')!==brand);
+  const first=[...sel.options].find(o=>!o.hidden);
+  if(first) sel.value=first.value;
+  loadRule();
+  tableRows.forEach(r=>r.style.display=(r.dataset.rowBrand===brand?'':'none'));
+}
+tabs.forEach(t=>t.addEventListener('click',()=>selectBrand(t.dataset.brand)));
+sel.addEventListener('change',loadRule);
+selectBrand('ENVY');
+</script>
+{% endblock %}

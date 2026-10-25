@@ -1,0 +1,18 @@
+ENVY NAME AND CATEGORY UPDATE
+
+- Correct brand spelling: ENVY.
+- Existing legacy brand value NV is migrated to ENVY at startup.
+- Admin Scheme Adjustment now displays ENVY and Pure Home.
+- Products now show ENVY as a brand.
+- Added ENVY category: Pocket
+  - Envy Pocket Dark 18ML
+  - Envy Pocket Luv 18ML
+  - Envy Pocket Noir 18ML
+- Added ENVY category: French Collection
+  - Envy 1000 Deo Arnold
+  - Envy 1000 Deo Juliette
+  - Envy 1000 Deo Leonardo
+  - Envy 1000 Deo Victoria
+  - Envy 1000 Deo George
+- Pocket uses Envy Pocket Perfume 18ml Admin scheme and 6-piece quantity increments.
+- French Collection uses Envy Deo (FRENCH COLLECTION) Admin scheme and 12-piece quantity increments.

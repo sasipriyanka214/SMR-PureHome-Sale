@@ -1,0 +1,79 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Dealer Targets{% endblock %}
+{% block admin_content %}
+<div class="mb-4">
+  <h2 class="mb-1">Dealer Targets</h2>
+  <p class="text-muted mb-0">Record monthly dealer targets and achieved amounts manually. Multiple records per dealer and month are allowed.</p>
+</div>
+
+<form method="get" class="panel mb-4">
+  <div class="row g-3 align-items-end">
+    <div class="col-sm-6 col-md-4">
+      <label class="form-label" for="dealer-target-month">Month</label>
+      <input id="dealer-target-month" class="form-control" type="month" name="month_year" value="{{month_year}}" required>
+    </div>
+    <div class="col-sm-4 col-md-3"><button class="btn btn-outline-primary w-100" type="submit">View Month</button></div>
+  </div>
+</form>
+
+<div class="panel mb-4">
+  <h5>Add Dealer Target Record</h5>
+  <form method="post" class="row g-3 align-items-end">
+    <input type="hidden" name="action" value="add">
+    <input type="hidden" name="month_year" value="{{month_year}}">
+    <div class="col-md-3">
+      <label class="form-label" for="dealer-name">Dealer name</label>
+      <input id="dealer-name" class="form-control" name="dealer_name" maxlength="150" required>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label" for="dealer-sap">SAP code</label>
+      <input id="dealer-sap" class="form-control" name="sap_code" maxlength="50">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label" for="dealer-target-amount">Target amount</label>
+      <input id="dealer-target-amount" class="form-control" type="number" name="target_amount" min="0" step="0.01" value="0" required>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label" for="dealer-achieved-amount">Achieved amount</label>
+      <input id="dealer-achieved-amount" class="form-control" type="number" name="achieved_amount" min="0" step="0.01" value="0" required>
+    </div>
+    <div class="col-md-3"><button class="btn btn-primary w-100" type="submit">Add Record</button></div>
+  </form>
+</div>
+
+<div class="panel table-responsive">
+  <table class="table table-bordered table-striped align-middle">
+    <thead class="table-light">
+      <tr><th>Dealer</th><th>SAP Code</th><th>Month</th><th>Target</th><th>Achieved</th><th>Update</th><th>Delete</th></tr>
+    </thead>
+    <tbody>
+      {% for target in targets %}
+      <tr>
+        <td>
+          <form id="edit-target-{{target.id}}" method="post">
+            <input type="hidden" name="action" value="update">
+            <input type="hidden" name="target_id" value="{{target.id}}">
+          </form>
+          <input form="edit-target-{{target.id}}" class="form-control form-control-sm" name="dealer_name" maxlength="150" value="{{target.dealer_name}}" aria-label="Dealer name" required>
+        </td>
+        <td><input form="edit-target-{{target.id}}" class="form-control form-control-sm" name="sap_code" maxlength="50" value="{{target.sap_code or ''}}" aria-label="SAP code"></td>
+        <td><input form="edit-target-{{target.id}}" class="form-control form-control-sm" type="month" name="month_year" value="{{target.month_year}}" aria-label="Month" required></td>
+        <td><input form="edit-target-{{target.id}}" class="form-control form-control-sm" type="number" name="target_amount" min="0" step="0.01" value="{{'%.2f'|format(target.target_amount)}}" aria-label="Target amount" required></td>
+        <td><input form="edit-target-{{target.id}}" class="form-control form-control-sm" type="number" name="achieved_amount" min="0" step="0.01" value="{{'%.2f'|format(target.achieved_amount)}}" aria-label="Achieved amount" required></td>
+        <td><button form="edit-target-{{target.id}}" class="btn btn-sm btn-outline-primary" type="submit">Save</button></td>
+        <td>
+          <form method="post" onsubmit="return confirm('Delete this dealer target record?')">
+            <input type="hidden" name="action" value="delete">
+            <input type="hidden" name="target_id" value="{{target.id}}">
+            <input type="hidden" name="month_year" value="{{month_year}}">
+            <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="text-center text-muted py-4">No dealer target records for {{month_year}}.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

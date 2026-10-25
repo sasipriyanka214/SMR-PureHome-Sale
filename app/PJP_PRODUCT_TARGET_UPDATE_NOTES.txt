@@ -1,0 +1,29 @@
+SMR PureHome - PJP / Product Target Update
+
+Implemented:
+1. Top navigation PJP page is functional for Admin and Users.
+2. Admin > PJP Management added:
+   - month/year PJP targets per User/TSI
+   - Primary Sales Target
+   - Secondary Sales Target
+   - Total Outlet Visits Target
+   - Beat Management with User, Dealer, Beat Name and Admin-controlled Repeat Days
+   - Beat Excel import using existing users/dealers only
+3. PJP page:
+   - month/year selector
+   - Admin can select TSI; users see their own PJP
+   - assigned beats only
+   - date-wise Excel-like schedule
+   - repeat-day validation with last selected and next available date
+   - add/remove PJP entries
+   - Excel download
+   - target information visible
+4. Home page Product Target:
+   - Admin-set monthly product targets in Pieces
+   - Admin + all Users can view
+   - Achieved, Remaining, Achieved %, Req. per Day calculated from confirmed/completed sales
+5. Existing Orders route/template/navigation preserved.
+6. Existing Admin account MIS09438 / Chebrolu Naga Vijaykumar is not renamed.
+
+Important:
+The uploaded ZIP did not contain the separate Beat Excel data file, so the code includes an Admin Beat Excel importer. Upload the actual Beat Excel from Admin > PJP Management to populate the mappings; no users are created or renamed.
