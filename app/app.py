@@ -2316,6 +2316,7 @@ def download_tsst_weekly_report():
 
 
 @app.route("/admin/download-tsst-complete-report", methods=["GET"])
+@app.route("/admin/download-complete-tsst-report", methods=["GET"])
 def download_tsst_complete_report():
     if not admin_required():
         return redirect(url_for("admin_login"))
