@@ -1,11 +1,11 @@
 from flask import Flask, abort, render_template, request, redirect, url_for, session, flash, send_file, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
-import os, io, csv, re
+import os, io, csv, re, json
 import math
 from datetime import datetime, date
 import calendar
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -27,6 +27,8 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY") or os.urandom(32)
 app.config["SESSION_COOKIE_NAME"] = "smr_sales_session_v2"
 
 from postgres_db import db
+
+VALID_ROLES = ["TSI", "SO", "ASM", "DSM", "BDM", "RSM"]
 
 # PostgreSQL error compatibility for the existing route exception handlers.
 try:
@@ -1423,6 +1425,9 @@ def _ensure_user_activation_schema(conn):
     conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE")
     conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS can_edit_products BOOLEAN NOT NULL DEFAULT FALSE")
     conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS can_view_reports BOOLEAN NOT NULL DEFAULT FALSE")
+    conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS tsst_designation TEXT NOT NULL DEFAULT ''")
+    conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS headquarters TEXT NOT NULL DEFAULT ''")
+    conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS mobile_number TEXT NOT NULL DEFAULT ''")
     conn.commit()
     _user_activation_schema_ready = True
 
@@ -1897,12 +1902,12 @@ def tsst_management():
                         (user_id,)
                     ).fetchone()
                     if not user:
-                        raise ValueError("Select a valid user, ASE, SO, or DSM account.")
+                        raise ValueError("Select a valid user or manager account.")
 
                     if action == "designation":
                         designation = request.form.get("designation", "").strip().upper()
-                        if designation not in {"", "ASE", "SO", "DSM"}:
-                            raise ValueError("Choose a valid TSST designation.")
+                        if designation not in {"", *VALID_ROLES}:
+                            raise ValueError("Choose a valid TSST role.")
                         conn.execute(
                             "UPDATE users SET tsst_designation=? WHERE id=?",
                             (designation, user_id)
@@ -1950,8 +1955,7 @@ def tsst_management():
                    GROUP BY user_id
                ) s ON s.user_id=u.id
                WHERE u.role IN ('USER','MANAGER')
-               ORDER BY CASE u.tsst_designation WHEN 'DSM' THEN 0 WHEN 'SO' THEN 1 WHEN 'ASE' THEN 2 ELSE 3 END,
-                        u.name""",
+               ORDER BY u.tsst_designation,u.name""",
             (year, month, start_date, end_date)
         ).fetchall()
         metrics = conn.execute(
@@ -1978,10 +1982,912 @@ def tsst_management():
         return render_template(
             "admin/tsst_management.html", users=report_rows, year=year, month=month,
             month_label=datetime(year, month, 1).strftime("%B %Y"), totals=totals,
-            metrics=metrics
+            metrics=metrics, valid_roles=VALID_ROLES
         )
     finally:
         conn.close()
+
+
+@app.route("/admin/tsst-reports")
+def tsst_reports_portal():
+    if not admin_required():
+        return redirect(url_for("admin_login"))
+    conn = db()
+    try:
+        _ensure_tsst_report_data_schema(conn)
+        rows = conn.execute(
+            "SELECT report_type,row_index,payload FROM tsst_report_data ORDER BY report_type,row_index"
+        ).fetchall()
+        data = {"tsst": [], "weekly": [], "metadata": {}}
+        for row in rows:
+            payload = json.loads(row["payload"])
+            if row["report_type"] == "metadata":
+                data["metadata"] = payload
+            else:
+                data[row["report_type"]].append(payload)
+        return render_template("admin_tsst_reports.html", report_data=data)
+    finally:
+        conn.close()
+
+
+def _ensure_tsst_report_data_schema(conn):
+    conn.execute("""CREATE TABLE IF NOT EXISTS tsst_report_data(
+        report_type TEXT NOT NULL,
+        row_index INTEGER NOT NULL,
+        payload TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(report_type,row_index)
+    )""")
+
+
+@app.route("/admin/tsst-reports/save", methods=["POST"])
+def save_tsst_reports():
+    if not admin_required():
+        return jsonify({"success": False, "message": "Administrator access is required."}), 403
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"success": False, "message": "Invalid report data."}), 400
+
+    tsst_fields = [
+        "mis_code", "asm_name", "so_name", "employee_name", "designation",
+        "distributor_name", "opening", "primary_target", "secondary_target",
+        "primary_achievement", "secondary_achievement", "closing",
+    ]
+    weekly_fields = [
+        "mis_code", "staff_name", "designation", "hq", "division", "mobile",
+        "monthly_primary", "monthly_secondary",
+        "week1_primary", "week1_secondary", "week2_primary", "week2_secondary",
+        "week3_primary", "week3_secondary", "week4_primary", "week4_secondary",
+        "total_primary", "total_secondary", "achievement_primary_percent",
+        "achievement_secondary_percent", "difference_primary", "difference_secondary",
+    ]
+    numeric_fields = {
+        "opening", "primary_target", "secondary_target", "primary_achievement",
+        "secondary_achievement", "closing", "monthly_primary", "monthly_secondary",
+        "week1_primary", "week1_secondary", "week2_primary", "week2_secondary",
+        "week3_primary", "week3_secondary", "week4_primary", "week4_secondary",
+        "total_primary", "total_secondary", "achievement_primary_percent",
+        "achievement_secondary_percent", "difference_primary", "difference_secondary",
+    }
+
+    def normalize_rows(key, fields):
+        rows = payload.get(key)
+        if not isinstance(rows, list):
+            raise ValueError(f"{key} must be a list.")
+        normalized = []
+        for row in rows:
+            if not isinstance(row, dict):
+                raise ValueError(f"Invalid row in {key}.")
+            clean = {}
+            for field in fields:
+                value = row.get(field, "")
+                if key == "weekly_rows" and field in {
+                    "total_primary", "total_secondary", "achievement_primary_percent",
+                    "achievement_secondary_percent", "difference_primary", "difference_secondary",
+                }:
+                    clean[field] = ""
+                    continue
+                if field in numeric_fields:
+                    if value in (None, ""):
+                        clean[field] = ""
+                        continue
+                    try:
+                        number = float(value)
+                    except (TypeError, ValueError):
+                        raise ValueError(f"{field.replace('_', ' ').title()} must be numeric.") from None
+                    if not math.isfinite(number) or number < 0:
+                        raise ValueError(f"{field.replace('_', ' ').title()} must be non-negative.")
+                    clean[field] = number
+                else:
+                    clean[field] = str(value or "").strip()[:250]
+            derived_fields = {
+                "total_primary", "total_secondary", "achievement_primary_percent",
+                "achievement_secondary_percent", "difference_primary", "difference_secondary",
+            }
+            entry_fields = [field for field in fields if field not in derived_fields]
+            if not any(str(clean[field]).strip() for field in entry_fields):
+                continue
+            if key == "weekly_rows":
+                clean["total_primary"] = round(
+                    sum(float(clean[f"week{week}_primary"] or 0) for week in range(1, 5)), 2
+                )
+                clean["total_secondary"] = round(
+                    sum(float(clean[f"week{week}_secondary"] or 0) for week in range(1, 5)), 2
+                )
+                monthly_primary = float(clean["monthly_primary"] or 0)
+                monthly_secondary = float(clean["monthly_secondary"] or 0)
+                clean["achievement_primary_percent"] = (
+                    clean["total_primary"] / monthly_primary if monthly_primary else 0
+                )
+                clean["achievement_secondary_percent"] = (
+                    clean["total_secondary"] / monthly_secondary if monthly_secondary else 0
+                )
+                clean["difference_primary"] = round(monthly_primary - clean["total_primary"], 2)
+                clean["difference_secondary"] = round(monthly_secondary - clean["total_secondary"], 2)
+            normalized.append(clean)
+        return normalized
+
+    try:
+        tsst_rows = normalize_rows("tsst_rows", tsst_fields)
+        weekly_rows = normalize_rows("weekly_rows", weekly_fields)
+    except ValueError as exc:
+        return jsonify({"success": False, "message": str(exc)}), 400
+
+    metadata = {
+        "rsm_name": str(payload.get("rsm_name") or "").strip()[:250],
+        "state_head": str(payload.get("state_head") or "").strip()[:250],
+    }
+    conn = db()
+    try:
+        _ensure_tsst_report_data_schema(conn)
+        now = datetime.now().isoformat(timespec="seconds")
+        for report_type, rows in (("tsst", tsst_rows), ("weekly", weekly_rows)):
+            conn.execute("DELETE FROM tsst_report_data WHERE report_type=?", (report_type,))
+            for row_index, row in enumerate(rows, 1):
+                conn.execute(
+                    """INSERT INTO tsst_report_data(report_type,row_index,payload,updated_at)
+                       VALUES(?,?,?,?)""",
+                    (report_type, row_index, json.dumps(row), now),
+                )
+        conn.execute("DELETE FROM tsst_report_data WHERE report_type='metadata'")
+        conn.execute(
+            """INSERT INTO tsst_report_data(report_type,row_index,payload,updated_at)
+               VALUES(?,?,?,?)""",
+            ("metadata", 0, json.dumps(metadata), now),
+        )
+        conn.commit()
+    except sqlite3.Error:
+        conn.rollback()
+        app.logger.exception("Could not save TSST report data")
+        return jsonify({"success": False, "message": "Could not save report data. Please try again."}), 500
+    finally:
+        conn.close()
+    return jsonify({"success": True, "message": "TSST report data saved."})
+
+
+def _create_tsst_report_workbook():
+    workbook = Workbook()
+    tsst_sheet = workbook.active
+    tsst_sheet.title = "TSST"
+    tsst_sheet.views.sheetView[0].showGridLines = True
+    peach_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+    thin_border = Border(
+        left=Side(style="thin", color="BFBFBF"),
+        right=Side(style="thin", color="BFBFBF"),
+        top=Side(style="thin", color="BFBFBF"),
+        bottom=Side(style="thin", color="BFBFBF"),
+    )
+    group_headers = [
+        ("Reporting Head Details", 4), ("Employee Details", 3),
+        ("DB Billing Linkage", 2), ("Distributor Details", 6),
+        ("Territory Details", 4), ("Stock", 1), ("Target (In Lacs)", 2),
+        ("Achievement (In Lacs)", 2), ("Stock", 1),
+    ]
+    sub_headers = [
+        "MIS CODE", "ASM Name", "MIS CODE", "SO Name",
+        "MIS CODE", "Employee Name", "Designation",
+        "SS SAP CODE", "SS | Depot Name",
+        "DB Type", "SAP CODE | M-Assist Client Id", "Distributor Name",
+        "District", "Town", "Division",
+        "No. of Working Days", "Number of Beat", "Number of Outlet",
+        "Opening (In Pre Tex Value)", "Primary", "Secondary", "Primary",
+        "Secondary", "Closing (In Pre Tex Value)",
+    ]
+
+    tsst_sheet.merge_cells(start_row=2, start_column=1, end_row=3, end_column=1)
+    serial_header = tsst_sheet.cell(row=2, column=1, value="S.NO")
+    serial_header.font = Font(name="Calibri", size=11, bold=True)
+    serial_header.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    serial_header.fill = peach_fill
+    serial_header.border = thin_border
+
+    column = 2
+    for title, span in group_headers:
+        if span > 1:
+            tsst_sheet.merge_cells(
+                start_row=2, start_column=column, end_row=2, end_column=column + span - 1
+            )
+        elif title == "Stock" and column == 21:
+            tsst_sheet.merge_cells(
+                start_row=2, start_column=column, end_row=3, end_column=column
+            )
+        cell = tsst_sheet.cell(row=2, column=column, value=title)
+        cell.font = Font(name="Calibri", size=11, bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.fill = peach_fill
+        cell.border = thin_border
+        column += span
+
+    for index, header in enumerate(sub_headers):
+        column = index + 2 + (1 if index >= 19 else 0)
+        cell = tsst_sheet.cell(row=3, column=column, value=header)
+        cell.font = Font(name="Calibri", size=10, bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.fill = peach_fill
+        cell.border = thin_border
+
+    tsst_sheet.row_dimensions[2].height = 30
+    tsst_sheet.row_dimensions[3].height = 66
+    tsst_sheet.freeze_panes = "A4"
+    tsst_sheet.auto_filter.ref = f"A3:{get_column_letter(len(sub_headers) + 1)}3"
+    tsst_sheet.column_dimensions["A"].width = 10
+    for index, header in enumerate(sub_headers):
+        column = index + 2 + (1 if index >= 19 else 0)
+        width = min(max(len(header) + 2, 12), 34)
+        tsst_sheet.column_dimensions[get_column_letter(column)].width = width
+
+    return workbook
+
+
+@app.route("/admin/download-tsst-report", methods=["GET"])
+def download_tsst_report():
+    if not admin_required():
+        return redirect(url_for("admin_login"))
+
+    workbook = _create_tsst_report_workbook()
+    workbook.create_sheet(title="Employee wise Weekly Tgt Vs Ach")
+    workbook["Employee wise Weekly Tgt Vs Ach"].views.sheetView[0].showGridLines = True
+
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return send_file(
+        output,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name="A.P_TSST_Report.xlsx",
+    )
+
+
+@app.route("/admin/download-tsst-weekly-report", methods=["GET"])
+def download_tsst_weekly_report():
+    if not admin_required():
+        return redirect(url_for("admin_login"))
+
+    workbook = _create_tsst_report_workbook()
+    weekly_sheet = workbook.create_sheet(title="Employee wise Weekly Tgt Vs Ach")
+    weekly_sheet.views.sheetView[0].showGridLines = True
+
+    peach_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+    dark_red_font = Font(name="Calibri", size=11, bold=True, color="C00000")
+    bold_font = Font(name="Calibri", size=10, bold=True)
+    thin_border = Border(
+        left=Side(style="thin", color="BFBFBF"),
+        right=Side(style="thin", color="BFBFBF"),
+        top=Side(style="thin", color="BFBFBF"),
+        bottom=Side(style="thin", color="BFBFBF"),
+    )
+
+    metadata = [
+        ("A1", "RSM/BDM NAME -->", "C1", ""),
+        ("A2", "STATE HEAD NAME -->", "C2", ""),
+        ("A3", "STATE -->", "C3", "AP"),
+    ]
+    for label_cell, label, value_cell, value in metadata:
+        weekly_sheet[label_cell] = label
+        weekly_sheet[label_cell].font = dark_red_font
+        weekly_sheet[value_cell] = value
+        weekly_sheet[value_cell].font = Font(name="Calibri", size=10, bold=True, color="1F4E78")
+        weekly_sheet[value_cell].alignment = Alignment(horizontal="center")
+
+    weekly_sheet.merge_cells("G1:W1")
+    weekly_sheet["G1"] = "Hamilton Sciences Pvt Ltd"
+    weekly_sheet["G1"].font = Font(name="Calibri", size=14, bold=True, color="1F4E78")
+    weekly_sheet["G1"].alignment = Alignment(horizontal="center", vertical="center")
+    weekly_sheet.merge_cells("G2:W2")
+    weekly_sheet["G2"] = "Weekly Primary & Secondary Target V/S Achievement Report"
+    weekly_sheet["G2"].font = Font(name="Calibri", size=12, bold=True, color="1F4E78")
+    weekly_sheet["G2"].alignment = Alignment(horizontal="center", vertical="center")
+
+    headers = [
+        "MIS CODE", "F. STAFF NAME", "DESIG.", "H.Q.", "DIV.", "MOBILE NO.",
+        "MONTHLY TARGET PRIMARY", "MONTHLY TARGET SECONDARY",
+        "ACH. (1st to 7th) PRI.", "ACH. (1st to 7th) SEC.",
+        "ACH. (8th to 15th) PRI.", "ACH. (8th to 15th) SEC.",
+        "ACH. (16th to 22nd) PRI.", "ACH. (16th to 22nd) SEC.",
+        "ACH. (23rd to 31st) PRI.", "ACH. (23rd to 31st) SEC.",
+        "TOTAL ACHIEVEMENT PRI.", "TOTAL ACHIEVEMENT SEC.",
+        "Ach. % PRI.", "Ach. % SEC.", "DIFFERENCE PRI.", "DIFFERENCE SEC.",
+    ]
+    weekly_sheet.row_dimensions[4].height = 30
+    for column, header in enumerate(headers, 1):
+        cell = weekly_sheet.cell(row=4, column=column, value=header)
+        cell.font = bold_font
+        cell.fill = peach_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = thin_border
+
+    weekly_sheet.freeze_panes = "A5"
+    weekly_sheet.auto_filter.ref = "A4:V4"
+    weekly_sheet.row_dimensions[4].height = 42
+    for column, header in enumerate(headers, 1):
+        weekly_sheet.column_dimensions[get_column_letter(column)].width = min(max(len(header) + 2, 12), 30)
+
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return send_file(
+        output,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name="AP_TSST_Weekly_Report.xlsx",
+    )
+
+
+@app.route("/admin/download-tsst-complete-report", methods=["GET"])
+def download_tsst_complete_report():
+    if not admin_required():
+        return redirect(url_for("admin_login"))
+
+    workbook = _create_tsst_report_workbook()
+    weekly_sheet = workbook.create_sheet(title="Employee wise Weekly Tgt Vs Ach")
+    weekly_sheet.views.sheetView[0].showGridLines = True
+
+    dark_red_font = Font(name="Calibri", size=11, bold=True, color="C00000")
+    metadata = [
+        ("A1", "RSM/BDM NAME -->", "C1", ""),
+        ("A2", "STATE HEAD NAME -->", "C2", ""),
+        ("A3", "STATE -->", "C3", "AP"),
+    ]
+    for label_cell, label, value_cell, value in metadata:
+        weekly_sheet[label_cell] = label
+        weekly_sheet[label_cell].font = dark_red_font
+        weekly_sheet[value_cell] = value
+        weekly_sheet[value_cell].font = Font(name="Calibri", size=10, bold=True, color="1F4E78")
+        weekly_sheet[value_cell].alignment = Alignment(horizontal="center")
+
+    weekly_sheet.merge_cells("G1:W1")
+    weekly_sheet["G1"] = "Hamilton Sciences Pvt Ltd"
+    weekly_sheet["G1"].font = Font(name="Calibri", size=14, bold=True, color="1F4E78")
+    weekly_sheet["G1"].alignment = Alignment(horizontal="center", vertical="center")
+    weekly_sheet.merge_cells("G2:W2")
+    weekly_sheet["G2"] = "Weekly Primary & Secondary Target V/S Achievement Report"
+    weekly_sheet["G2"].font = Font(name="Calibri", size=12, bold=True, color="1F4E78")
+    weekly_sheet["G2"].alignment = Alignment(horizontal="center", vertical="center")
+
+    weekly_headers = [
+        "MIS CODE", "F. STAFF NAME", "DESIG.", "H.Q.", "DIV.", "MOBILE NO.",
+        "MONTHLY TARGET PRIMARY", "MONTHLY TARGET SECONDARY",
+        "ACH. (1st to 7th) PRI.", "ACH. (1st to 7th) SEC.",
+        "ACH. (8th to 15th) PRI.", "ACH. (8th to 15th) SEC.",
+        "ACH. (16th to 22nd) PRI.", "ACH. (16th to 22nd) SEC.",
+        "ACH. (23rd to 31st) PRI.", "ACH. (23rd to 31st) SEC.",
+        "TOTAL ACHIEVEMENT PRI.", "TOTAL ACHIEVEMENT SEC.",
+        "Ach. % PRI.", "Ach. % SEC.", "DIFFERENCE PRI.", "DIFFERENCE SEC.",
+    ]
+    weekly_sheet.row_dimensions[4].height = 42
+    for column, header in enumerate(weekly_headers, 1):
+        cell = weekly_sheet.cell(row=4, column=column, value=header)
+        cell.font = Font(name="Calibri", size=10, bold=True)
+        cell.fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = Border(
+            left=Side(style="thin", color="BFBFBF"),
+            right=Side(style="thin", color="BFBFBF"),
+            top=Side(style="thin", color="BFBFBF"),
+            bottom=Side(style="thin", color="BFBFBF"),
+        )
+        weekly_sheet.column_dimensions[get_column_letter(column)].width = min(max(len(header) + 2, 12), 30)
+    weekly_sheet.freeze_panes = "A5"
+
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return send_file(
+        output,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name="A.P_TSST_Complete_Report.xlsx",
+    )
+
+
+@app.route("/admin/download-tsst-blank-excel", methods=["GET"])
+def download_tsst_blank_excel():
+    if not admin_required():
+        return redirect(url_for("admin_login"))
+
+    workbook = _create_tsst_report_workbook()
+    weekly_sheet = workbook.create_sheet(title="Employee wise Weekly Tgt Vs Ach")
+    weekly_sheet.views.sheetView[0].showGridLines = True
+    dark_red_font = Font(name="Calibri", size=11, bold=True, color="C00000")
+
+    for cell, value in [
+        ("A1", "RSM/BDM NAME -->"),
+        ("A2", "STATE HEAD NAME -->"),
+        ("A3", "STATE -->"),
+    ]:
+        weekly_sheet[cell] = value
+        weekly_sheet[cell].font = dark_red_font
+    weekly_sheet["C3"] = "AP"
+
+    weekly_sheet.merge_cells("G1:W1")
+    weekly_sheet["G1"] = "Hamilton Sciences Pvt Ltd"
+    weekly_sheet["G1"].font = Font(name="Calibri", size=14, bold=True, color="1F4E78")
+    weekly_sheet["G1"].alignment = Alignment(horizontal="center", vertical="center")
+    weekly_sheet.merge_cells("G2:W2")
+    weekly_sheet["G2"] = "Weekly Primary & Secondary Target V/S Achievement Report"
+    weekly_sheet["G2"].font = Font(name="Calibri", size=12, bold=True, color="1F4E78")
+    weekly_sheet["G2"].alignment = Alignment(horizontal="center", vertical="center")
+
+    headers = [
+        "MIS CODE", "F. STAFF NAME", "DESIG.", "H.Q.", "DIV.", "MOBILE NO.",
+        "MONTHLY TARGET PRIMARY", "MONTHLY TARGET SECONDARY",
+        "ACH. (1st to 7th) PRI.", "ACH. (1st to 7th) SEC.",
+        "ACH. (8th to 15th) PRI.", "ACH. (8th to 15th) SEC.",
+        "ACH. (16th to 22nd) PRI.", "ACH. (16th to 22nd) SEC.",
+        "ACH. (23rd to 31st) PRI.", "ACH. (23rd to 31st) SEC.",
+        "TOTAL ACHIEVEMENT PRI.", "TOTAL ACHIEVEMENT SEC.",
+        "Ach. % PRI.", "Ach. % SEC.", "DIFFERENCE PRI.", "DIFFERENCE SEC.",
+    ]
+    weekly_sheet.row_dimensions[4].height = 42
+    for column, header in enumerate(headers, 1):
+        cell = weekly_sheet.cell(row=4, column=column, value=header)
+        cell.font = Font(name="Calibri", size=10, bold=True)
+        cell.fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = Border(
+            left=Side(style="thin", color="BFBFBF"),
+            right=Side(style="thin", color="BFBFBF"),
+            top=Side(style="thin", color="BFBFBF"),
+            bottom=Side(style="thin", color="BFBFBF"),
+        )
+        weekly_sheet.column_dimensions[get_column_letter(column)].width = min(max(len(header) + 2, 12), 30)
+    weekly_sheet.freeze_panes = "A5"
+    weekly_sheet.auto_filter.ref = "A4:V4"
+
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return send_file(
+        output,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name="AP_TSST_Blank_Template.xlsx",
+    )
+
+
+@app.route("/admin/download-tsst-formula-excel", methods=["GET"])
+def download_tsst_formula_excel():
+    if not admin_required():
+        return redirect(url_for("admin_login"))
+
+    workbook = _create_tsst_report_workbook()
+    weekly_sheet = workbook.create_sheet(title="Employee wise Weekly Tgt Vs Ach")
+    weekly_sheet.views.sheetView[0].showGridLines = True
+    peach_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+    dark_red_font = Font(name="Calibri", size=11, bold=True, color="C00000")
+    thin_border = Border(
+        left=Side(style="thin", color="BFBFBF"),
+        right=Side(style="thin", color="BFBFBF"),
+        top=Side(style="thin", color="BFBFBF"),
+        bottom=Side(style="thin", color="BFBFBF"),
+    )
+
+    for cell, value in [
+        ("A1", "RSM/BDM NAME -->"),
+        ("A2", "STATE HEAD NAME -->"),
+        ("A3", "STATE -->"),
+    ]:
+        weekly_sheet[cell] = value
+        weekly_sheet[cell].font = dark_red_font
+    weekly_sheet["C3"] = "AP"
+
+    weekly_sheet.merge_cells("G1:W1")
+    weekly_sheet["G1"] = "Hamilton Sciences Pvt Ltd"
+    weekly_sheet["G1"].font = Font(name="Calibri", size=14, bold=True, color="1F4E78")
+    weekly_sheet["G1"].alignment = Alignment(horizontal="center", vertical="center")
+    weekly_sheet.merge_cells("G2:W2")
+    weekly_sheet["G2"] = "Weekly Primary & Secondary Target V/S Achievement Report"
+    weekly_sheet["G2"].font = Font(name="Calibri", size=12, bold=True, color="1F4E78")
+    weekly_sheet["G2"].alignment = Alignment(horizontal="center", vertical="center")
+
+    headers = [
+        "MIS CODE", "F. STAFF NAME", "DESIG.", "H.Q.", "DIV.", "MOBILE NO.",
+        "MONTHLY TARGET PRIMARY", "MONTHLY TARGET SECONDARY",
+        "ACH. (1st to 7th) PRI.", "ACH. (1st to 7th) SEC.",
+        "ACH. (8th to 15th) PRI.", "ACH. (8th to 15th) SEC.",
+        "ACH. (16th to 22nd) PRI.", "ACH. (16th to 22nd) SEC.",
+        "ACH. (23rd to 31st) PRI.", "ACH. (23rd to 31st) SEC.",
+        "TOTAL ACHIEVEMENT PRI.", "TOTAL ACHIEVEMENT SEC.",
+        "Ach. % PRI.", "Ach. % SEC.", "DIFFERENCE PRI.", "DIFFERENCE SEC.",
+    ]
+    weekly_sheet.row_dimensions[4].height = 42
+    for column, header in enumerate(headers, 1):
+        cell = weekly_sheet.cell(row=4, column=column, value=header)
+        cell.font = Font(name="Calibri", size=10, bold=True)
+        cell.fill = peach_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = thin_border
+        weekly_sheet.column_dimensions[get_column_letter(column)].width = min(max(len(header) + 2, 12), 30)
+
+    for row in range(5, 105):
+        formulas = {
+            17: f'=IF(COUNTA(A{row}:P{row})=0,"",SUM(I{row},K{row},M{row},O{row}))',
+            18: f'=IF(COUNTA(A{row}:P{row})=0,"",SUM(J{row},L{row},N{row},P{row}))',
+            19: f'=IF(OR(COUNTA(A{row}:P{row})=0,G{row}=0),"",Q{row}/G{row})',
+            20: f'=IF(OR(COUNTA(A{row}:P{row})=0,H{row}=0),"",R{row}/H{row})',
+            21: f'=IF(COUNTA(A{row}:P{row})=0,"",G{row}-Q{row})',
+            22: f'=IF(COUNTA(A{row}:P{row})=0,"",H{row}-R{row})',
+        }
+        for column in range(1, 23):
+            cell = weekly_sheet.cell(row=row, column=column)
+            cell.font = Font(name="Calibri", size=10)
+            cell.border = thin_border
+            if column >= 7:
+                cell.alignment = Alignment(horizontal="right")
+            if column in formulas:
+                cell.value = formulas[column]
+                if column in (19, 20):
+                    cell.number_format = "0.0%"
+
+    weekly_sheet.freeze_panes = "A5"
+    weekly_sheet.auto_filter.ref = "A4:V104"
+    workbook.calculation.fullCalcOnLoad = True
+    workbook.calculation.forceFullCalc = True
+    workbook.calculation.calcMode = "auto"
+
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return send_file(
+        output,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name="AP_TSST_Report_Formulas.xlsx",
+    )
+
+
+@app.route("/admin/download-perfect-excel", methods=["GET"])
+def download_perfect_excel():
+    if not admin_required():
+        return redirect(url_for("admin_login"))
+
+    workbook = _create_tsst_report_workbook()
+    weekly_sheet = workbook.create_sheet(title="Employee wise Weekly Tgt Vs Ach")
+    weekly_sheet.views.sheetView[0].showGridLines = True
+    peach_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+    dark_red_font = Font(name="Calibri", size=11, bold=True, color="C00000")
+    company_font = Font(name="Calibri", size=14, bold=True, color="1F4E78")
+    title_font = Font(name="Calibri", size=12, bold=True, color="1F4E78")
+    header_font = Font(name="Calibri", size=10, bold=True)
+    thin_border = Border(
+        left=Side(style="thin", color="BFBFBF"),
+        right=Side(style="thin", color="BFBFBF"),
+        top=Side(style="thin", color="BFBFBF"),
+        bottom=Side(style="thin", color="BFBFBF"),
+    )
+
+    for row, label in enumerate(
+        ("RSM/BDM NAME -->", "STATE HEAD NAME -->", "STATE -->"), 1
+    ):
+        weekly_sheet.merge_cells(start_row=row, start_column=1, end_row=row, end_column=2)
+        cell = weekly_sheet.cell(row=row, column=1, value=label)
+        cell.font = dark_red_font
+        cell.alignment = Alignment(vertical="center")
+        if row == 3:
+            weekly_sheet["C3"] = "AP"
+            weekly_sheet["C3"].font = Font(name="Calibri", size=10, bold=True, color="1F4E78")
+            weekly_sheet["C3"].alignment = Alignment(horizontal="center", vertical="center")
+
+    weekly_sheet.merge_cells("G1:V1")
+    weekly_sheet["G1"] = "Hamilton Sciences Pvt Ltd"
+    weekly_sheet["G1"].font = company_font
+    weekly_sheet["G1"].alignment = Alignment(horizontal="center", vertical="center")
+    weekly_sheet.merge_cells("G2:V2")
+    weekly_sheet["G2"] = "Weekly Primary & Secondary Target V/S Achievement Report"
+    weekly_sheet["G2"].font = title_font
+    weekly_sheet["G2"].alignment = Alignment(horizontal="center", vertical="center")
+
+    top_groups = [
+        ("Monthly Target", 7, 8),
+        ("ACH. (1st to 7th)", 9, 10),
+        ("ACH. (8th to 15th)", 11, 12),
+        ("ACH. (16th to 22nd)", 13, 14),
+        ("ACH. (23rd to 31st)", 15, 16),
+        ("TOTAL ACHIEVEMENT", 17, 20),
+        ("DIFFERENCE", 21, 22),
+    ]
+    for column in range(1, 7):
+        weekly_sheet.merge_cells(start_row=4, start_column=column, end_row=5, end_column=column)
+    for title, start_column, end_column in top_groups:
+        weekly_sheet.merge_cells(
+            start_row=4, start_column=start_column, end_row=4, end_column=end_column
+        )
+        cell = weekly_sheet.cell(row=4, column=start_column, value=title)
+        cell.font = header_font
+        cell.fill = peach_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    headers = [
+        "MIS CODE", "F. STAFF NAME", "DESIG.", "H.Q.", "DIV.", "MOBILE NO.",
+        "PRIMARY", "SECONDARY",
+        "PRI.", "SEC.", "PRI.", "SEC.", "PRI.", "SEC.", "PRI.", "SEC.",
+        "PRI.", "SEC.", "Ach. % PRI.", "Ach. % SEC.",
+        "PRI.", "SEC.",
+    ]
+    for column, header in enumerate(headers, 1):
+        if column <= 6:
+            cell = weekly_sheet.cell(row=4, column=column)
+            cell.value = header
+        else:
+            cell = weekly_sheet.cell(row=5, column=column, value=header)
+        cell.font = header_font
+        cell.fill = peach_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = thin_border
+
+    for row in range(4, 6):
+        for column in range(1, 23):
+            weekly_sheet.cell(row=row, column=column).border = thin_border
+            weekly_sheet.cell(row=row, column=column).fill = peach_fill
+    weekly_sheet.row_dimensions[4].height = 30
+    weekly_sheet.row_dimensions[5].height = 42
+    weekly_sheet.freeze_panes = "A6"
+    weekly_sheet.auto_filter.ref = "A5:V5"
+    for column, header in enumerate(headers, 1):
+        weekly_sheet.column_dimensions[get_column_letter(column)].width = min(max(len(header) + 2, 12), 30)
+
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return send_file(
+        output,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name="AP_TSST_Final_Formatted_Report.xlsx",
+    )
+
+
+@app.route("/admin/download-perfect-weekly-report", methods=["GET"])
+def download_perfect_weekly_report():
+    if not admin_required():
+        return redirect(url_for("admin_login"))
+
+    workbook = _create_tsst_report_workbook()
+    weekly_sheet = workbook.create_sheet(title="Employee wise Weekly Tgt Vs Ach")
+    weekly_sheet.views.sheetView[0].showGridLines = True
+
+    peach_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+    dark_red_font = Font(name="Calibri", size=11, bold=True, color="C00000")
+    bold_font = Font(name="Calibri", size=10, bold=True)
+    regular_font = Font(name="Calibri", size=9)
+    thin_border = Border(
+        left=Side(style="thin", color="A6A6A6"),
+        right=Side(style="thin", color="A6A6A6"),
+        top=Side(style="thin", color="A6A6A6"),
+        bottom=Side(style="thin", color="A6A6A6"),
+    )
+
+    for row, label in enumerate(("RSM/BDM NAME -->", "STATE HEAD NAME -->", "STATE -->"), 1):
+        weekly_sheet.merge_cells(start_row=row, start_column=1, end_row=row, end_column=2)
+        label_cell = weekly_sheet.cell(row=row, column=1, value=label)
+        label_cell.font = dark_red_font
+        if row == 3:
+            weekly_sheet["C3"] = "AP"
+            weekly_sheet["C3"].font = Font(name="Calibri", size=10, bold=True, color="1F4E78")
+
+    weekly_sheet.merge_cells("C1:F1")
+    weekly_sheet.merge_cells("C2:F2")
+    weekly_sheet.merge_cells("G1:U1")
+    weekly_sheet["G1"] = "Hamilton Sciences Pvt Ltd"
+    weekly_sheet["G1"].font = Font(name="Calibri", size=14, bold=True, color="1F4E78")
+    weekly_sheet["G1"].alignment = Alignment(horizontal="center", vertical="center")
+    weekly_sheet.merge_cells("G2:U2")
+    weekly_sheet["G2"] = "Weekly Primary & Secondary Target V/S Achievement Report"
+    weekly_sheet["G2"].font = Font(name="Calibri", size=12, bold=True, color="1F4E78")
+    weekly_sheet["G2"].alignment = Alignment(horizontal="center", vertical="center")
+
+    for cell_range, title in (
+        ("G4:H4", "MONTHLY TARGET"),
+        ("I4:J4", "ACH. (1st to 7th)"),
+        ("K4:L4", "ACH. (8th to 15th)"),
+        ("M4:N4", "ACH. (16th to 22nd)"),
+        ("O4:P4", "ACH. (23rd to 31st)"),
+        ("Q4:R4", "TOTAL ACHIEVEMENT"),
+        ("S4:T4", "DIFFERENCE"),
+    ):
+        weekly_sheet.merge_cells(cell_range)
+        weekly_sheet[cell_range.split(":")[0]] = title
+    weekly_sheet["U4"] = "PRIMARY 1ST TO 29TH"
+
+    sub_headers = [
+        "MIS CODE", "F. STAFF NAME", "DESIG.", "H.Q.", "DIV.", "MOBILE NO.",
+        "PRIMARY", "SECONDARY", "PRI.", "SEC.", "PRI.", "SEC.", "PRI.", "SEC.",
+        "PRI.", "SEC.", "PRI.", "SEC.", "PRI.", "SEC.", "PRIMARY 1ST TO 29TH",
+    ]
+    for column, header in enumerate(sub_headers, 1):
+        weekly_sheet.cell(row=5, column=column, value=header)
+
+    for row in range(1, 4):
+        for column in range(1, 22):
+            cell = weekly_sheet.cell(row=row, column=column)
+            cell.border = thin_border
+            cell.alignment = Alignment(vertical="center", wrap_text=True)
+    for row in (4, 5):
+        for column in range(1, 22):
+            cell = weekly_sheet.cell(row=row, column=column)
+            cell.fill = peach_fill
+            cell.font = bold_font
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell.border = thin_border
+
+    first_data_row, last_data_row = 6, 105
+    for row in range(first_data_row, last_data_row + 1):
+        for column in range(1, 22):
+            cell = weekly_sheet.cell(row=row, column=column)
+            cell.font = regular_font
+            cell.border = thin_border
+            if column >= 7:
+                cell.number_format = "0.00"
+
+    total_row = last_data_row + 1
+    weekly_sheet.merge_cells(start_row=total_row, start_column=1, end_row=total_row, end_column=6)
+    weekly_sheet.cell(row=total_row, column=1, value="TOTAL")
+    for column in range(7, 22):
+        letter = get_column_letter(column)
+        weekly_sheet.cell(
+            row=total_row,
+            column=column,
+            value=f"=SUM({letter}{first_data_row}:{letter}{last_data_row})",
+        )
+    for column in range(1, 22):
+        cell = weekly_sheet.cell(row=total_row, column=column)
+        cell.fill = peach_fill
+        cell.font = bold_font
+        cell.border = thin_border
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        if column >= 7:
+            cell.number_format = "0.00"
+
+    weekly_sheet.row_dimensions[4].height = 32
+    weekly_sheet.row_dimensions[5].height = 38
+    weekly_sheet.freeze_panes = "A6"
+    weekly_sheet.auto_filter.ref = f"A5:U{last_data_row}"
+    for column, header in enumerate(sub_headers, 1):
+        weekly_sheet.column_dimensions[get_column_letter(column)].width = min(max(len(header) + 2, 12), 28)
+    weekly_sheet.column_dimensions["B"].width = 24
+
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return send_file(
+        output,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name="AP_TSST_Final_Weekly_Report.xlsx",
+    )
+
+
+@app.route("/admin/download-exact-cumulative-report", methods=["GET"])
+def download_exact_cumulative_report():
+    if not admin_required():
+        return redirect(url_for("admin_login"))
+
+    workbook = _create_tsst_report_workbook()
+    weekly_sheet = workbook.create_sheet(title="Employee wise Weekly Tgt Vs Ach")
+    weekly_sheet.views.sheetView[0].showGridLines = True
+
+    peach_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+    dark_red_font = Font(name="Calibri", size=11, bold=True, color="C00000")
+    bold_font = Font(name="Calibri", size=10, bold=True)
+    regular_font = Font(name="Calibri", size=9)
+    thin_border = Border(
+        left=Side(style="thin", color="A6A6A6"),
+        right=Side(style="thin", color="A6A6A6"),
+        top=Side(style="thin", color="A6A6A6"),
+        bottom=Side(style="thin", color="A6A6A6"),
+    )
+
+    weekly_sheet.merge_cells("A1:B1")
+    weekly_sheet["A1"] = "RSM/BDM NAME -->"
+    weekly_sheet["A1"].font = dark_red_font
+    weekly_sheet.merge_cells("C1:F1")
+    weekly_sheet.merge_cells("G1:U1")
+    weekly_sheet["G1"] = "Hamilton Sciences Pvt Ltd"
+    weekly_sheet["G1"].font = Font(name="Calibri", size=14, bold=True, color="1F4E78")
+    weekly_sheet["G1"].alignment = Alignment(horizontal="center", vertical="center")
+
+    weekly_sheet.merge_cells("A2:B2")
+    weekly_sheet["A2"] = "STATE HEAD NAME -->"
+    weekly_sheet["A2"].font = dark_red_font
+    weekly_sheet.merge_cells("C2:F2")
+    weekly_sheet.merge_cells("G2:U2")
+    weekly_sheet["G2"] = "Weekly Primary & Secondary Target V/S Achievement Report"
+    weekly_sheet["G2"].font = Font(name="Calibri", size=12, bold=True, color="1F4E78")
+    weekly_sheet["G2"].alignment = Alignment(horizontal="center", vertical="center")
+
+    weekly_sheet.merge_cells("A3:B3")
+    weekly_sheet["A3"] = "STATE -->"
+    weekly_sheet["A3"].font = dark_red_font
+    weekly_sheet["C3"] = "AP"
+    weekly_sheet["C3"].font = Font(name="Calibri", size=10, bold=True, color="1F4E78")
+
+    grouped_headers = [
+        ("G4:H4", "MONTHLY TARGET"),
+        ("I4:J4", "ACH. (1st to 7th)"),
+        ("K4:L4", "ACH. (8th to 15th)"),
+        ("M4:N4", "ACH. (16th to 22nd)"),
+        ("O4:P4", "ACH. (23rd to 31st)"),
+        ("Q4:R4", "TOTAL ACHIEVEMENT"),
+        ("S4:T4", "DIFFERENCE"),
+    ]
+    for cell_range, title in grouped_headers:
+        weekly_sheet.merge_cells(cell_range)
+        weekly_sheet[cell_range.split(":")[0]] = title
+    weekly_sheet["U4"] = "PRIMARY 1ST TO 29TH"
+
+    sub_headers = [
+        "MIS CODE", "F. STAFF NAME", "DESIG.", "H.Q.", "DIV.", "MOBILE NO.",
+        "PRIMARY", "SECONDARY", "PRI.", "SEC.", "PRI.", "SEC.", "PRI.", "SEC.",
+        "PRI.", "SEC.", "PRI.", "SEC.", "PRI.", "SEC.", "PRIMARY 1ST TO 29TH",
+    ]
+    for column, header in enumerate(sub_headers, 1):
+        weekly_sheet.cell(row=5, column=column, value=header)
+
+    for row in range(1, 4):
+        for column in range(1, 22):
+            cell = weekly_sheet.cell(row=row, column=column)
+            cell.border = thin_border
+            cell.alignment = Alignment(vertical="center", wrap_text=True)
+    for row in (4, 5):
+        for column in range(1, 22):
+            cell = weekly_sheet.cell(row=row, column=column)
+            cell.fill = peach_fill
+            cell.font = bold_font
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell.border = thin_border
+
+    sample_rows = [
+        ["", "", "", "", "", "", 0.00, 0.00, 0.00, 0.39, 0.00, 0.46, 1.14, 0.44, 1.14, 1.29, -1, -1, 0.35],
+        ["", "", "", "", "", "", 0.00, 0.38, 0.00, 0.51, 0.00, 0.39, 1.11, 0.48, 1.11, 1.77, -1, -2, ""],
+        ["", "", "", "", "", "", 0.00, 0.17, 0.08, 0.96, 1.29, 0.23, 0.49, 0.58, 1.86, 1.93, -2, -2, 2.68],
+    ]
+    for row_index, row_values in enumerate(sample_rows, start=6):
+        for column, value in enumerate(row_values, start=1):
+            cell = weekly_sheet.cell(row=row_index, column=column, value=value)
+            cell.border = thin_border
+            cell.font = regular_font
+            if column >= 7 and value != "":
+                cell.number_format = "0.00"
+
+    total_row = 10
+    summary_identity = ["MIS09438", "Chebrolu Naga Vijaykumar", "SO", "GUNTUR", "V2", "9959700971"]
+    for column, value in enumerate(summary_identity, start=1):
+        cell = weekly_sheet.cell(row=total_row, column=column, value=value)
+        cell.font = bold_font
+        cell.border = thin_border
+    cumulative_values = [
+        0.00, 0.00, 0, 1, 0, 2, 1, 1, 1, 3, 1, 4.11, -4, -5, 3.03,
+    ]
+    for column, value in enumerate(cumulative_values, start=7):
+        cell = weekly_sheet.cell(row=total_row, column=column, value=value)
+        cell.font = bold_font
+        cell.border = thin_border
+        cell.fill = peach_fill
+        if value != "":
+            cell.number_format = "0.00"
+    for column in range(1, 22):
+        weekly_sheet.cell(row=total_row, column=column).border = thin_border
+        weekly_sheet.cell(row=total_row, column=column).fill = peach_fill
+
+    weekly_sheet.row_dimensions[4].height = 32
+    weekly_sheet.row_dimensions[5].height = 38
+    weekly_sheet.freeze_panes = "A6"
+    weekly_sheet.auto_filter.ref = "A5:U8"
+    for column, header in enumerate(sub_headers, 1):
+        weekly_sheet.column_dimensions[get_column_letter(column)].width = min(max(len(header) + 2, 12), 28)
+    weekly_sheet.column_dimensions["B"].width = 30
+
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return send_file(
+        output,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name="AP_TSST_Cumulative_Report.xlsx",
+    )
 
 
 def _ensure_monthly_product_targets_table(conn):
@@ -3717,6 +4623,48 @@ def _build_primary_draft(conn, dealer_id, selected_ids, form):
     items, group_summaries=apply_overall_schemes(conn, items)
     return {"dealer_id":dealer['id'],"dealer_name":dealer['dealer_name'],"town":dealer['town'],"sap_code":dealer['sap_code'],"items":items,"scheme_groups":group_summaries}
 
+@app.route("/products/save-selection", methods=["POST"])
+def products_save_selection():
+    if not login_required():
+        return jsonify({"error": "Please log in to save your product selection."}), 401
+
+    dealer_id=(request.form.get('dealer_id') or '').strip()
+    items={}
+    for product_id in request.form.getlist('selected_products'):
+        try:
+            product_id=str(int(product_id))
+            quantity=int(request.form.get(f"quantity_{product_id}", "0"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid product selection."}), 400
+        if int(product_id) <= 0 or quantity <= 0:
+            return jsonify({"error": "Invalid product selection."}), 400
+        items[product_id]=quantity
+
+    session['product_selection']={"dealer_id":dealer_id,"items":items}
+    return jsonify({"ok": True})
+
+@app.route("/primary-order/from-products", methods=["POST"])
+def primary_order_from_products():
+    if not login_required():
+        return redirect(url_for("login"))
+
+    conn=db()
+    try:
+        draft=_build_primary_draft(
+            conn,
+            (request.form.get('dealer_id') or '').strip(),
+            request.form.getlist('selected_products'),
+            request.form
+        )
+        session['primary_draft']=draft
+        session.pop('product_selection',None)
+    except (ValueError,sqlite3.Error) as e:
+        flash(str(e),'danger')
+        return redirect(url_for('products', brand=request.form.get('brand','')))
+    finally:
+        conn.close()
+    return redirect(url_for('primary_order_review'))
+
 @app.route("/primary-order/review", methods=["GET","POST"])
 def primary_order_review():
     if not login_required(): return redirect(url_for("login"))
@@ -4581,6 +5529,31 @@ def admin_users():
         _ensure_user_activation_schema(conn)
         if request.method=="POST":
             action=request.form.get("action","add").strip().lower()
+            if action=="edit_profile":
+                uid=request.form.get("user_id", type=int)
+                name=request.form.get("name","").strip()
+                designation=request.form.get("designation","").strip().upper()
+                headquarters=request.form.get("headquarters","").strip()
+                mobile_number=request.form.get("mobile_number","").strip()
+                if not uid:
+                    raise ValueError("Select a valid user.")
+                if not name:
+                    raise ValueError("Employee Name is required.")
+                if designation not in {"", *VALID_ROLES}:
+                    raise ValueError("Select a valid designation.")
+                if len(name)>200 or len(headquarters)>200 or len(mobile_number)>32:
+                    raise ValueError("Name and headquarters must be 200 characters or fewer; mobile number must be 32 characters or fewer.")
+                result=conn.execute(
+                    """UPDATE users
+                       SET name=?, tsst_designation=?, headquarters=?, mobile_number=?
+                       WHERE id=?""",
+                    (name,designation,headquarters,mobile_number,uid)
+                )
+                if result.rowcount!=1:
+                    raise ValueError("User not found.")
+                conn.commit()
+                flash("User details updated successfully.","success")
+                return redirect(url_for("admin_users"))
             if action=="edit_name":
                 uid=int(request.form.get("user_id"))
                 name=request.form.get("name","").strip()
@@ -4615,12 +5588,19 @@ def admin_users():
         conn.rollback(); flash("Email or User Code already exists.","danger")
     except Exception as e:
         conn.rollback(); flash(str(e),"danger")
-    users=conn.execute("SELECT id,name,user_code,email,role,created_at,is_active FROM users ORDER BY id DESC").fetchall()
+    users=conn.execute(
+        """SELECT id,name,user_code,email,role,created_at,is_active,tsst_designation,
+                  headquarters,mobile_number
+           FROM users ORDER BY id DESC"""
+    ).fetchall()
     active_admin_count=conn.execute(
         "SELECT COUNT(*) AS count FROM users WHERE role='ADMIN' AND is_active=TRUE"
     ).fetchone()["count"]
     conn.close()
-    return render_template("admin/users.html",users=users,active_admin_count=active_admin_count)
+    return render_template(
+        "admin/users.html", users=users, active_admin_count=active_admin_count,
+        valid_designations=VALID_ROLES
+    )
 
 
 @app.route("/admin/managers", methods=["GET", "POST"])

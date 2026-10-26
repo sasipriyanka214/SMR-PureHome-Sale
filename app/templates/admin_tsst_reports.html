@@ -1,0 +1,228 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}TSST Reports{% endblock %}
+{% block admin_content %}
+{% set tsst_rows = report_data.tsst or [{}] %}
+{% set weekly_rows = report_data.weekly or [{}] %}
+<div class="container-fluid mt-4">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+    <h2 class="mb-0">TSST Reports</h2>
+    <div class="d-flex flex-wrap gap-2">
+      <a href="{{url_for('download_tsst_blank_excel')}}" class="btn btn-outline-success btn-sm">Download Blank Excel Template</a>
+      <a href="{{url_for('download_tsst_formula_excel')}}" class="btn btn-outline-primary btn-sm">Download Formula Excel Template</a>
+      <a href="{{url_for('download_perfect_excel')}}" class="btn btn-outline-dark btn-sm">Download Final Formatted Excel</a>
+      <a href="{{url_for('download_perfect_weekly_report')}}" class="btn btn-outline-info btn-sm">Download Perfect Weekly Report</a>
+      <a href="{{url_for('download_exact_cumulative_report')}}" class="btn btn-outline-warning btn-sm">Download Cumulative Report</a>
+    </div>
+  </div>
+
+  <ul class="nav nav-tabs" id="reportTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" id="tsst-tab" data-bs-toggle="tab" data-bs-target="#tsst-content" type="button" role="tab" aria-controls="tsst-content" aria-selected="true">TSST Report</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="weekly-tab" data-bs-toggle="tab" data-bs-target="#weekly-content" type="button" role="tab" aria-controls="weekly-content" aria-selected="false">Employee Wise Weekly Target Vs Achievement</button>
+    </li>
+  </ul>
+
+  <div class="tab-content border border-top-0 p-3 bg-white" id="reportTabsContent">
+    <section class="tab-pane fade show active" id="tsst-content" role="tabpanel" aria-labelledby="tsst-tab" tabindex="0">
+      <h4 class="text-primary mb-3">Territory Wise Sales &amp; Stock Tracker</h4>
+      <div class="d-flex justify-content-end mb-2">
+        <button type="button" class="btn btn-outline-primary btn-sm" data-add-row="tsst">Add TSST Row</button>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-bordered table-sm align-middle report-edit-table">
+          <thead class="table-light"><tr>
+            <th>S.NO</th><th>MIS CODE</th><th>ASM Name</th><th>SO Name</th><th>Employee Name</th><th>Designation</th><th>Distributor Name</th><th>Opening</th><th>Primary Target</th><th>Secondary Target</th><th>Primary Ach.</th><th>Secondary Ach.</th><th>Closing</th><th></th>
+          </tr></thead>
+          <tbody id="tsst-rows">
+            {% for row in tsst_rows %}
+            <tr data-report-row="tsst">
+              <td class="row-number">{{loop.index}}</td>
+              {% for field in ['mis_code','asm_name','so_name','employee_name','designation','distributor_name'] %}
+              <td><input class="form-control form-control-sm" data-field="{{field}}" value="{{row.get(field, '')}}" aria-label="{{field|replace('_',' ')|title}}"></td>
+              {% endfor %}
+              {% for field in ['opening','primary_target','secondary_target','primary_achievement','secondary_achievement','closing'] %}
+              <td><input type="number" min="0" step="0.01" class="form-control form-control-sm" data-field="{{field}}" value="{{row.get(field, '')}}" aria-label="{{field|replace('_',' ')|title}}"></td>
+              {% endfor %}
+              <td><button type="button" class="btn btn-outline-danger btn-sm" data-remove-row aria-label="Remove row">×</button></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="tab-pane fade" id="weekly-content" role="tabpanel" aria-labelledby="weekly-tab" tabindex="0">
+      <h4 class="text-primary mb-3">Employee Wise Weekly Target V/S Achievement Report</h4>
+      <div class="row mb-3">
+        <div class="col-md-4">
+          <label class="fw-bold text-danger" for="rsmName">RSM/BDM NAME:</label>
+          <input type="text" id="rsmName" class="form-control form-control-sm" value="{{report_data.metadata.get('rsm_name','')}}" placeholder="Enter BDM / RSM Name">
+        </div>
+        <div class="col-md-4">
+          <label class="fw-bold text-danger" for="stateHead">STATE HEAD NAME:</label>
+          <input type="text" id="stateHead" class="form-control form-control-sm" value="{{report_data.metadata.get('state_head','')}}" placeholder="Enter State Head Name">
+        </div>
+        <div class="col-md-4">
+          <label class="fw-bold text-danger">STATE:</label>
+          <input type="text" class="form-control form-control-sm" value="AP" readonly>
+        </div>
+      </div>
+      <div class="d-flex justify-content-end mb-2">
+        <button type="button" class="btn btn-outline-primary btn-sm" data-add-row="weekly">Add Employee Row</button>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-bordered table-sm align-middle report-edit-table">
+          <thead class="table-light">
+            <tr>
+              <th rowspan="2">MIS CODE</th><th rowspan="2">Staff Name</th><th rowspan="2">Desig.</th><th rowspan="2">H.Q.</th><th rowspan="2">Div.</th><th rowspan="2">Mobile</th>
+              <th colspan="2">Monthly Target</th><th colspan="2">1st to 7th</th><th colspan="2">8th to 15th</th><th colspan="2">16th to 22nd</th><th colspan="2">23rd to 31st</th>
+              <th colspan="4">Total Achievement</th><th colspan="2">Difference</th><th rowspan="2"></th>
+            </tr>
+            <tr>
+              <th>Primary</th><th>Secondary</th><th>Primary</th><th>Secondary</th><th>Primary</th><th>Secondary</th>
+              <th>Primary</th><th>Secondary</th><th>Primary</th><th>Secondary</th>
+              <th>Primary</th><th>Secondary</th><th>Ach. % Pri.</th><th>Ach. % Sec.</th><th>Primary</th><th>Secondary</th>
+            </tr>
+          </thead>
+          <tbody id="weekly-rows">
+            {% for row in weekly_rows %}
+            <tr data-report-row="weekly">
+              {% for field in ['mis_code','staff_name','designation','hq','division','mobile'] %}
+              <td><input class="form-control form-control-sm" data-field="{{field}}" value="{{row.get(field, '')}}" aria-label="{{field|replace('_',' ')|title}}"></td>
+              {% endfor %}
+              {% for field in ['monthly_primary','monthly_secondary','week1_primary','week1_secondary','week2_primary','week2_secondary','week3_primary','week3_secondary','week4_primary','week4_secondary'] %}
+              <td><input type="number" min="0" step="0.01" class="form-control form-control-sm" data-field="{{field}}" value="{{row.get(field, '')}}" aria-label="{{field|replace('_',' ')|title}}"></td>
+              {% endfor %}
+              <td data-total="total_primary">{{row.get('total_primary','')}}</td>
+              <td data-total="total_secondary">{{row.get('total_secondary','')}}</td>
+              <td data-total="achievement_primary_percent">{{'%.1f%%'|format(row.get('achievement_primary_percent',0)*100) if row.get('monthly_primary') else ''}}</td>
+              <td data-total="achievement_secondary_percent">{{'%.1f%%'|format(row.get('achievement_secondary_percent',0)*100) if row.get('monthly_secondary') else ''}}</td>
+              <td data-total="difference_primary">{{row.get('difference_primary','')}}</td>
+              <td data-total="difference_secondary">{{row.get('difference_secondary','')}}</td>
+              <td><button type="button" class="btn btn-outline-danger btn-sm" data-remove-row aria-label="Remove row">×</button></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <div class="mt-3 d-flex align-items-center gap-3">
+    <button class="btn btn-primary btn-sm" type="button" id="saveReports">Save Changes</button>
+    <span id="saveStatus" class="small" role="status" aria-live="polite"></span>
+    <a href="{{url_for('download_tsst_complete_report')}}" class="btn btn-success btn-sm ms-auto">Download Complete Excel Report</a>
+  </div>
+</div>
+
+<template id="tsst-row-template">
+  <tr data-report-row="tsst">
+    <td class="row-number"></td>
+    {% for field in ['mis_code','asm_name','so_name','employee_name','designation','distributor_name'] %}<td><input class="form-control form-control-sm" data-field="{{field}}"></td>{% endfor %}
+    {% for field in ['opening','primary_target','secondary_target','primary_achievement','secondary_achievement','closing'] %}<td><input type="number" min="0" step="0.01" class="form-control form-control-sm" data-field="{{field}}"></td>{% endfor %}
+    <td><button type="button" class="btn btn-outline-danger btn-sm" data-remove-row aria-label="Remove row">×</button></td>
+  </tr>
+</template>
+<template id="weekly-row-template">
+  <tr data-report-row="weekly">
+    {% for field in ['mis_code','staff_name','designation','hq','division','mobile'] %}<td><input class="form-control form-control-sm" data-field="{{field}}"></td>{% endfor %}
+    {% for field in ['monthly_primary','monthly_secondary','week1_primary','week1_secondary','week2_primary','week2_secondary','week3_primary','week3_secondary','week4_primary','week4_secondary'] %}<td><input type="number" min="0" step="0.01" class="form-control form-control-sm" data-field="{{field}}"></td>{% endfor %}
+    <td data-total="total_primary"></td><td data-total="total_secondary"></td>
+    <td data-total="achievement_primary_percent"></td><td data-total="achievement_secondary_percent"></td>
+    <td data-total="difference_primary"></td><td data-total="difference_secondary"></td>
+    <td><button type="button" class="btn btn-outline-danger btn-sm" data-remove-row aria-label="Remove row">×</button></td>
+  </tr>
+</template>
+<style>
+.report-edit-table{min-width:1500px;font-size:11px}
+.report-edit-table th{white-space:nowrap;text-align:center}
+.report-edit-table input{min-width:90px}
+</style>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const status = document.getElementById('saveStatus');
+  const rowFields = {
+    tsst: ['mis_code','asm_name','so_name','employee_name','designation','distributor_name','opening','primary_target','secondary_target','primary_achievement','secondary_achievement','closing'],
+    weekly: ['mis_code','staff_name','designation','hq','division','mobile','monthly_primary','monthly_secondary','week1_primary','week1_secondary','week2_primary','week2_secondary','week3_primary','week3_secondary','week4_primary','week4_secondary','total_primary','total_secondary','achievement_primary_percent','achievement_secondary_percent','difference_primary','difference_secondary']
+  };
+  const renumberTsst = () => document.querySelectorAll('#tsst-rows .row-number').forEach((cell, index) => cell.textContent = index + 1);
+  const updateWeeklyTotals = (row) => {
+    const read = field => Number(row.querySelector(`[data-field="${field}"]`).value || 0);
+    const write = (field, value) => {
+      row.querySelector(`[data-total="${field}"]`).textContent = value;
+    };
+    const monthlyPri = read('monthly_primary');
+    const monthlySec = read('monthly_secondary');
+    const totalPri = [1,2,3,4].reduce((sum, week) => sum + read(`week${week}_primary`), 0);
+    const totalSec = [1,2,3,4].reduce((sum, week) => sum + read(`week${week}_secondary`), 0);
+    write('total_primary', totalPri.toFixed(2));
+    write('total_secondary', totalSec.toFixed(2));
+    write('achievement_primary_percent', monthlyPri > 0 ? `${(totalPri / monthlyPri * 100).toFixed(1)}%` : '');
+    write('achievement_secondary_percent', monthlySec > 0 ? `${(totalSec / monthlySec * 100).toFixed(1)}%` : '');
+    write('difference_primary', (monthlyPri - totalPri).toFixed(2));
+    write('difference_secondary', (monthlySec - totalSec).toFixed(2));
+  };
+  const collectRows = (type) => Array.from(document.querySelectorAll(`#${type}-rows tr`)).map(row => {
+    const data = {};
+    rowFields[type].forEach(field => {
+      const input = row.querySelector(`[data-field="${field}"]`);
+      const total = row.querySelector(`[data-total="${field}"]`);
+      data[field] = input ? input.value.trim() : (total?.textContent.trim() || '');
+    });
+    return data;
+  });
+  document.querySelectorAll('[data-add-row]').forEach(button => button.addEventListener('click', () => {
+    const type = button.dataset.addRow;
+    const template = document.getElementById(`${type}-row-template`);
+    document.getElementById(`${type}-rows`).appendChild(template.content.cloneNode(true));
+    if (type === 'tsst') renumberTsst();
+  }));
+  document.addEventListener('click', event => {
+    const button = event.target.closest('[data-remove-row]');
+    if (!button) return;
+    const row = button.closest('tr');
+    const body = row.parentElement;
+    row.remove();
+    if (!body.children.length) {
+      const type = body.id.replace('-rows', '');
+      body.appendChild(document.getElementById(`${type}-row-template`).content.cloneNode(true));
+    }
+    renumberTsst();
+  });
+  document.getElementById('weekly-rows').addEventListener('input', event => {
+    if (event.target.matches('[data-field]')) updateWeeklyTotals(event.target.closest('tr'));
+  });
+  document.getElementById('weekly-rows').querySelectorAll('tr').forEach(updateWeeklyTotals);
+  document.getElementById('saveReports').addEventListener('click', async () => {
+    status.textContent = 'Saving…';
+    status.className = 'small text-muted';
+    const payload = {
+      tsst_rows: collectRows('tsst'),
+      weekly_rows: collectRows('weekly'),
+      rsm_name: document.getElementById('rsmName').value,
+      state_head: document.getElementById('stateHead').value
+    };
+    try {
+      const response = await fetch('{{url_for("save_tsst_reports")}}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        credentials: 'same-origin',
+        body: JSON.stringify(payload)
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message || 'Could not save report data.');
+      status.textContent = result.message;
+      status.className = 'small text-success';
+    } catch (error) {
+      status.textContent = error.message || 'Could not save report data.';
+      status.className = 'small text-danger';
+    }
+  });
+  renumberTsst();
+})();
+</script>
+{% endblock %}
