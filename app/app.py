@@ -2,6 +2,7 @@ from flask import Flask, abort, render_template, request, redirect, url_for, ses
 from werkzeug.security import generate_password_hash, check_password_hash
 import os, io, csv, re, json
 import math
+import zipfile
 from datetime import datetime, date
 import calendar
 from openpyxl import Workbook, load_workbook
@@ -1428,6 +1429,8 @@ def _ensure_user_activation_schema(conn):
     conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS tsst_designation TEXT NOT NULL DEFAULT ''")
     conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS headquarters TEXT NOT NULL DEFAULT ''")
     conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS mobile_number TEXT NOT NULL DEFAULT ''")
+    conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS division TEXT NOT NULL DEFAULT ''")
+    conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS reporting_superior TEXT NOT NULL DEFAULT ''")
     conn.commit()
     _user_activation_schema_ready = True
 
@@ -1989,23 +1992,210 @@ def tsst_management():
 
 
 @app.route("/admin/tsst-reports")
+@app.route("/admin/tsst-report")
 def tsst_reports_portal():
     if not admin_required():
         return redirect(url_for("admin_login"))
     conn = db()
     try:
-        _ensure_tsst_report_data_schema(conn)
-        rows = conn.execute(
-            "SELECT report_type,row_index,payload FROM tsst_report_data ORDER BY report_type,row_index"
+        return render_template(
+            "admin_tsst_reports.html",
+            report_data=_load_tsst_report_data(conn),
+            report_variant="tsst",
+            report_save_url=url_for("save_tsst_reports"),
+            report_download_url=url_for("download_tsst_complete_report"),
+            other_report_url=url_for("tsspdcl_report_portal"),
+        )
+    finally:
+        conn.close()
+
+
+@app.route("/admin/tsspdcl-report")
+def tsspdcl_report_portal():
+    if not admin_required():
+        return redirect(url_for("admin_login"))
+    conn = db()
+    try:
+        stored_data = _load_tsst_report_data(conn)
+        return render_template(
+            "admin_tsst_reports.html",
+            report_data={
+                **stored_data,
+                "tsst": stored_data["tsspdcl"],
+            },
+            report_variant="tsspdcl",
+            report_save_url=url_for("save_tsspdcl_data"),
+            report_download_url=url_for("download_tsspdcl_excel"),
+            other_report_url=url_for("tsst_reports_portal"),
+        )
+    finally:
+        conn.close()
+
+
+@app.route("/admin/weekly-report")
+def weekly_report_portal():
+    if not admin_required():
+        return redirect(url_for("admin_login"))
+    conn = db()
+    try:
+        return render_template(
+            "admin_weekly_report.html",
+            report_data=_load_tsst_report_data(conn),
+        )
+    finally:
+        conn.close()
+
+
+@app.route("/api/get-weekly-data", methods=["GET"])
+def get_weekly_data():
+    if not admin_required():
+        return jsonify({"success": False, "message": "Administrator access is required."}), 403
+
+    conn = db()
+    try:
+        report_rows = _load_tsst_report_data(conn)["weekly"]
+        rows_by_code = {
+            str(row.get("mis_code", "")).strip().upper(): row
+            for row in report_rows
+            if str(row.get("mis_code", "")).strip()
+        }
+        _ensure_user_activation_schema(conn)
+        users = conn.execute(
+            """SELECT user_code,name,tsst_designation,headquarters,division,mobile_number
+               FROM users
+               WHERE role IN ('USER','MANAGER') AND is_active=TRUE
+               ORDER BY name"""
         ).fetchall()
-        data = {"tsst": [], "weekly": [], "metadata": {}}
-        for row in rows:
-            payload = json.loads(row["payload"])
-            if row["report_type"] == "metadata":
-                data["metadata"] = payload
-            else:
-                data[row["report_type"]].append(payload)
-        return render_template("admin_tsst_reports.html", report_data=data)
+        results = []
+        matched_codes = set()
+        for user in users:
+            code = str(user["user_code"] or "").strip().upper()
+            saved = rows_by_code.get(code, {})
+            if code:
+                matched_codes.add(code)
+            results.append({
+                **saved,
+                "mis_code": user["user_code"] or saved.get("mis_code", ""),
+                "name": user["name"] or saved.get("staff_name", ""),
+                "desig": user["tsst_designation"] or saved.get("designation", ""),
+                "hq": user["headquarters"] or saved.get("hq", ""),
+                "div": user["division"] or saved.get("division", ""),
+                "mobile": user["mobile_number"] or saved.get("mobile", ""),
+                "pri_target": saved.get("monthly_primary", ""),
+                "sec_target": saved.get("monthly_secondary", ""),
+                "w1_pri": saved.get("week1_primary", ""),
+                "w1_sec": saved.get("week1_secondary", ""),
+                "w2_pri": saved.get("week2_primary", ""),
+                "w2_sec": saved.get("week2_secondary", ""),
+                "w3_pri": saved.get("week3_primary", ""),
+                "w3_sec": saved.get("week3_secondary", ""),
+                "w4_pri": saved.get("week4_primary", ""),
+                "w4_sec": saved.get("week4_secondary", ""),
+            })
+        results.extend(
+            {
+                **row,
+                "name": row.get("staff_name", ""),
+                "desig": row.get("designation", ""),
+                "div": row.get("division", ""),
+                "pri_target": row.get("monthly_primary", ""),
+                "sec_target": row.get("monthly_secondary", ""),
+                "w1_pri": row.get("week1_primary", ""),
+                "w1_sec": row.get("week1_secondary", ""),
+                "w2_pri": row.get("week2_primary", ""),
+                "w2_sec": row.get("week2_secondary", ""),
+                "w3_pri": row.get("week3_primary", ""),
+                "w3_sec": row.get("week3_secondary", ""),
+                "w4_pri": row.get("week4_primary", ""),
+                "w4_sec": row.get("week4_secondary", ""),
+            }
+            for row in report_rows
+            if not str(row.get("mis_code", "")).strip()
+            or str(row.get("mis_code", "")).strip().upper() not in matched_codes
+        )
+        return jsonify(results)
+    finally:
+        conn.close()
+
+
+@app.route("/api/get-tsst-data", methods=["GET"])
+def get_tsst_data():
+    if not admin_required():
+        return jsonify({"status": "error", "message": "Administrator access is required."}), 403
+    conn = db()
+    try:
+        rows = _load_tsst_report_data(conn)["tsst"]
+        return jsonify([
+            {
+                "sno": index,
+                "asm_mis": row.get("asm_mis", ""),
+                "asm_name": row.get("asm_name", ""),
+                "so_mis": row.get("so_mis", ""),
+                "so_name": row.get("so_name", ""),
+                "emp_mis": row.get("employee_mis", ""),
+                "emp_name": row.get("employee_name", ""),
+                "desig": row.get("designation", ""),
+                "ss_sap": row.get("ss_sap", ""),
+                "depot": row.get("depot", ""),
+                "db_type": row.get("db_type", ""),
+                "client_id": row.get("client_id", ""),
+                "dist_name": row.get("distributor_name", ""),
+                "district": row.get("district", ""),
+                "town": row.get("town", ""),
+                "division": row.get("division", ""),
+                "working_days": row.get("working_days", ""),
+                "beats": row.get("beats", ""),
+                "outlets": row.get("outlets", ""),
+                "opening": row.get("opening", ""),
+                "pri_target": row.get("primary_target", ""),
+                "sec_target": row.get("secondary_target", ""),
+                "pri_ach": row.get("primary_achievement", ""),
+                "sec_ach": row.get("secondary_achievement", ""),
+                "closing": row.get("closing", ""),
+            }
+            for index, row in enumerate(rows, 1)
+        ])
+    finally:
+        conn.close()
+
+
+@app.route("/api/get-tsspdcl-data", methods=["GET"])
+def get_tsspdcl_data():
+    if not admin_required():
+        return jsonify({"status": "error", "message": "Administrator access is required."}), 403
+    conn = db()
+    try:
+        rows = _load_tsst_report_data(conn)["tsspdcl"]
+        return jsonify([
+            {
+                "sno": index,
+                "asm_mis": row.get("asm_mis", ""),
+                "asm_name": row.get("asm_name", ""),
+                "so_mis": row.get("so_mis", ""),
+                "so_name": row.get("so_name", ""),
+                "emp_mis": row.get("employee_mis", ""),
+                "emp_name": row.get("employee_name", ""),
+                "desig": row.get("designation", ""),
+                "ss_sap": row.get("ss_sap", ""),
+                "depot": row.get("depot", ""),
+                "db_type": row.get("db_type", ""),
+                "client_id": row.get("client_id", ""),
+                "dist_name": row.get("distributor_name", ""),
+                "district": row.get("district", ""),
+                "town": row.get("town", ""),
+                "division": row.get("division", ""),
+                "working_days": row.get("working_days", ""),
+                "beats": row.get("beats", ""),
+                "outlets": row.get("outlets", ""),
+                "opening": row.get("opening", ""),
+                "pri_target": row.get("primary_target", ""),
+                "sec_target": row.get("secondary_target", ""),
+                "pri_ach": row.get("primary_achievement", ""),
+                "sec_ach": row.get("secondary_achievement", ""),
+                "closing": row.get("closing", ""),
+            }
+            for index, row in enumerate(rows, 1)
+        ])
     finally:
         conn.close()
 
@@ -2020,18 +2210,91 @@ def _ensure_tsst_report_data_schema(conn):
     )""")
 
 
+def _load_tsst_report_data(conn):
+    _ensure_tsst_report_data_schema(conn)
+    rows = conn.execute(
+        "SELECT report_type,payload FROM tsst_report_data ORDER BY report_type,row_index"
+    ).fetchall()
+    data = {"tsst": [], "tsspdcl": [], "weekly": [], "metadata": {}}
+    tsst_aliases = {
+        "employee_mis": ("emp_mis", "mis_code"),
+        "employee_name": ("emp_name",),
+        "designation": ("desig",),
+        "ss_sap": ("ss_sap_code",),
+        "depot": ("ss_depot",),
+        "client_id": ("m_assist_client_id",),
+        "distributor_name": ("dist_name",),
+        "working_days": ("no_of_working_days",),
+        "beats": ("number_of_beat",),
+        "outlets": ("number_of_outlet",),
+        "primary_target": ("pri_target",),
+        "secondary_target": ("sec_target",),
+        "primary_achievement": ("pri_ach",),
+        "secondary_achievement": ("sec_ach",),
+    }
+    weekly_aliases = {
+        "staff_name": ("name",),
+        "designation": ("desig",),
+        "division": ("div",),
+        "monthly_primary": ("pri_target",),
+        "monthly_secondary": ("sec_target",),
+        "week1_primary": ("w1_pri",),
+        "week1_secondary": ("w1_sec",),
+        "week2_primary": ("w2_pri",),
+        "week2_secondary": ("w2_sec",),
+        "week3_primary": ("w3_pri",),
+        "week3_secondary": ("w3_sec",),
+        "week4_primary": ("w4_pri",),
+        "week4_secondary": ("w4_sec",),
+    }
+    for row in rows:
+        payload = json.loads(row["payload"])
+        if row["report_type"] == "metadata":
+            data["metadata"] = payload
+        elif row["report_type"] in {"tsst", "tsspdcl"}:
+            for field, aliases in tsst_aliases.items():
+                if payload.get(field) in ("", None):
+                    payload[field] = next(
+                        (payload[alias] for alias in aliases if payload.get(alias) not in ("", None)),
+                        "",
+                    )
+            data[row["report_type"]].append(payload)
+        elif row["report_type"] == "weekly":
+            for field, aliases in weekly_aliases.items():
+                if payload.get(field) in ("", None):
+                    payload[field] = next(
+                        (payload[alias] for alias in aliases if payload.get(alias) not in ("", None)),
+                        "",
+                    )
+            data[row["report_type"]].append(payload)
+        else:
+            raise ValueError(f"Unknown TSST report type: {row['report_type']}")
+    return data
+
+
+@app.route("/api/save-tsst-data", methods=["POST"])
 @app.route("/admin/tsst-reports/save", methods=["POST"])
 def save_tsst_reports():
     if not admin_required():
         return jsonify({"success": False, "message": "Administrator access is required."}), 403
 
     payload = request.get_json(silent=True)
+    if isinstance(payload, list):
+        report_key = {
+            "/api/save-weekly-data": "weekly_rows",
+            "/admin/weekly-report/save": "weekly_rows",
+            "/api/save-tsspdcl-data": "tsspdcl_rows",
+            "/admin/tsspdcl-report/save": "tsspdcl_rows",
+        }.get(request.path, "tsst_rows")
+        payload = {report_key: payload}
     if not isinstance(payload, dict):
         return jsonify({"success": False, "message": "Invalid report data."}), 400
 
     tsst_fields = [
-        "mis_code", "asm_name", "so_name", "employee_name", "designation",
-        "distributor_name", "opening", "primary_target", "secondary_target",
+        "asm_mis", "asm_name", "so_mis", "so_name", "employee_mis", "mis_code",
+        "employee_name", "designation", "ss_sap", "depot", "db_type", "client_id",
+        "distributor_name", "district", "town", "division", "working_days", "beats",
+        "outlets", "opening", "primary_target", "secondary_target",
         "primary_achievement", "secondary_achievement", "closing",
     ]
     weekly_fields = [
@@ -2044,12 +2307,14 @@ def save_tsst_reports():
     ]
     numeric_fields = {
         "opening", "primary_target", "secondary_target", "primary_achievement",
-        "secondary_achievement", "closing", "monthly_primary", "monthly_secondary",
+        "secondary_achievement", "closing", "working_days", "beats", "outlets",
+        "monthly_primary", "monthly_secondary",
         "week1_primary", "week1_secondary", "week2_primary", "week2_secondary",
         "week3_primary", "week3_secondary", "week4_primary", "week4_secondary",
         "total_primary", "total_secondary", "achievement_primary_percent",
         "achievement_secondary_percent", "difference_primary", "difference_secondary",
     }
+    integer_fields = {"working_days", "beats", "outlets"}
 
     def normalize_rows(key, fields):
         rows = payload.get(key)
@@ -2059,6 +2324,53 @@ def save_tsst_reports():
         for row in rows:
             if not isinstance(row, dict):
                 raise ValueError(f"Invalid row in {key}.")
+            if key in {"tsst_rows", "tsspdcl_rows"}:
+                aliases = {
+                    "employee_mis": ("emp_mis", "mis_code"),
+                    "employee_name": ("emp_name",),
+                    "designation": ("desig",),
+                    "ss_sap": ("ss_sap_code",),
+                    "depot": ("ss_depot",),
+                    "client_id": ("m_assist_client_id",),
+                    "distributor_name": ("dist_name",),
+                    "working_days": ("no_of_working_days",),
+                    "beats": ("number_of_beat",),
+                    "outlets": ("number_of_outlet",),
+                    "primary_target": ("pri_target",),
+                    "secondary_target": ("sec_target",),
+                    "primary_achievement": ("pri_ach",),
+                    "secondary_achievement": ("sec_ach",),
+                }
+                row = dict(row)
+                for field, field_aliases in aliases.items():
+                    if row.get(field) in ("", None):
+                        row[field] = next(
+                            (row[alias] for alias in field_aliases if row.get(alias) not in ("", None)),
+                            "",
+                        )
+            elif key == "weekly_rows":
+                aliases = {
+                    "staff_name": ("name",),
+                    "designation": ("desig",),
+                    "division": ("div",),
+                    "monthly_primary": ("pri_target",),
+                    "monthly_secondary": ("sec_target",),
+                    "week1_primary": ("w1_pri",),
+                    "week1_secondary": ("w1_sec",),
+                    "week2_primary": ("w2_pri",),
+                    "week2_secondary": ("w2_sec",),
+                    "week3_primary": ("w3_pri",),
+                    "week3_secondary": ("w3_sec",),
+                    "week4_primary": ("w4_pri",),
+                    "week4_secondary": ("w4_sec",),
+                }
+                row = dict(row)
+                for field, field_aliases in aliases.items():
+                    if row.get(field) in ("", None):
+                        row[field] = next(
+                            (row[alias] for alias in field_aliases if row.get(alias) not in ("", None)),
+                            "",
+                        )
             clean = {}
             for field in fields:
                 value = row.get(field, "")
@@ -2078,6 +2390,10 @@ def save_tsst_reports():
                         raise ValueError(f"{field.replace('_', ' ').title()} must be numeric.") from None
                     if not math.isfinite(number) or number < 0:
                         raise ValueError(f"{field.replace('_', ' ').title()} must be non-negative.")
+                    if field in integer_fields and not number.is_integer():
+                        raise ValueError(f"{field.replace('_', ' ').title()} must be a whole number.")
+                    if field in integer_fields:
+                        number = int(number)
                     clean[field] = number
                 else:
                     clean[field] = str(value or "").strip()[:250]
@@ -2108,21 +2424,33 @@ def save_tsst_reports():
             normalized.append(clean)
         return normalized
 
+    report_key = {
+        "/api/save-tsspdcl-data": "tsspdcl_rows",
+        "/admin/tsspdcl-report/save": "tsspdcl_rows",
+    }.get(request.path)
+    if report_key and report_key not in payload and "tsst_rows" in payload:
+        payload[report_key] = payload.pop("tsst_rows")
+
     try:
-        tsst_rows = normalize_rows("tsst_rows", tsst_fields)
-        weekly_rows = normalize_rows("weekly_rows", weekly_fields)
+        if not any(key in payload for key in ("tsst_rows", "tsspdcl_rows", "weekly_rows")):
+            raise ValueError("Provide at least one report to save.")
+        tsst_rows = normalize_rows("tsst_rows", tsst_fields) if "tsst_rows" in payload else None
+        tsspdcl_rows = normalize_rows("tsspdcl_rows", tsst_fields) if "tsspdcl_rows" in payload else None
+        weekly_rows = normalize_rows("weekly_rows", weekly_fields) if "weekly_rows" in payload else None
     except ValueError as exc:
         return jsonify({"success": False, "message": str(exc)}), 400
 
-    metadata = {
-        "rsm_name": str(payload.get("rsm_name") or "").strip()[:250],
-        "state_head": str(payload.get("state_head") or "").strip()[:250],
-    }
     conn = db()
     try:
         _ensure_tsst_report_data_schema(conn)
         now = datetime.now().isoformat(timespec="seconds")
-        for report_type, rows in (("tsst", tsst_rows), ("weekly", weekly_rows)):
+        for report_type, rows in (
+            ("tsst", tsst_rows),
+            ("tsspdcl", tsspdcl_rows),
+            ("weekly", weekly_rows),
+        ):
+            if rows is None:
+                continue
             conn.execute("DELETE FROM tsst_report_data WHERE report_type=?", (report_type,))
             for row_index, row in enumerate(rows, 1):
                 conn.execute(
@@ -2130,6 +2458,20 @@ def save_tsst_reports():
                        VALUES(?,?,?,?)""",
                     (report_type, row_index, json.dumps(row), now),
                 )
+        current_metadata = (
+            _load_tsst_report_data(conn)["metadata"]
+            if "rsm_name" not in payload or "state_head" not in payload
+            else {}
+        )
+        metadata = {
+            **current_metadata,
+            "rsm_name": str(payload.get("rsm_name", current_metadata.get("rsm_name", "")) or "").strip()[:250],
+            "state_head": str(payload.get("state_head", current_metadata.get("state_head", "")) or "").strip()[:250],
+        }
+        if tsst_rows is not None:
+            metadata["tsst_saved"] = True
+        if tsspdcl_rows is not None:
+            metadata["tsspdcl_saved"] = True
         conn.execute("DELETE FROM tsst_report_data WHERE report_type='metadata'")
         conn.execute(
             """INSERT INTO tsst_report_data(report_type,row_index,payload,updated_at)
@@ -2143,7 +2485,38 @@ def save_tsst_reports():
         return jsonify({"success": False, "message": "Could not save report data. Please try again."}), 500
     finally:
         conn.close()
-    return jsonify({"success": True, "message": "TSST report data saved."})
+    if weekly_rows is not None and tsst_rows is None and tsspdcl_rows is None:
+        message = "Weekly report data saved."
+    elif tsspdcl_rows is not None and tsst_rows is None:
+        message = "TSSPDCL report data saved."
+    else:
+        message = "TSST report data saved."
+    return jsonify({
+        "success": True,
+        "status": "success",
+        "message": message,
+    })
+
+
+@app.route("/api/save-tsspdcl-data", methods=["POST"])
+@app.route("/admin/tsspdcl-report/save", methods=["POST"])
+def save_tsspdcl_data():
+    if not admin_required():
+        return jsonify({"success": False, "message": "Administrator access is required."}), 403
+    return save_tsst_reports()
+
+
+@app.route("/api/save-weekly-data", methods=["POST"])
+@app.route("/admin/weekly-report/save", methods=["POST"])
+def save_weekly_data():
+    if not admin_required():
+        return jsonify({"success": False, "message": "Administrator access is required."}), 403
+    payload = request.get_json(silent=True)
+    if isinstance(payload, list):
+        payload = {"weekly_rows": payload}
+    if not isinstance(payload, dict) or "weekly_rows" not in payload:
+        return jsonify({"success": False, "message": "Invalid weekly report data."}), 400
+    return save_tsst_reports()
 
 
 def _create_tsst_report_workbook():
@@ -2161,8 +2534,8 @@ def _create_tsst_report_workbook():
     group_headers = [
         ("Reporting Head Details", 4), ("Employee Details", 3),
         ("DB Billing Linkage", 2), ("Distributor Details", 6),
-        ("Territory Details", 4), ("Stock", 1), ("Target (In Lacs)", 2),
-        ("Achievement (In Lacs)", 2), ("Stock", 1),
+        ("Territory Details", 3), ("Opening Stock", 1), ("Target (In Lacs)", 2),
+        ("Achievement (In Lacs)", 2), ("Closing Stock", 1),
     ]
     sub_headers = [
         "MIS CODE", "ASM Name", "MIS CODE", "SO Name",
@@ -2188,10 +2561,6 @@ def _create_tsst_report_workbook():
             tsst_sheet.merge_cells(
                 start_row=2, start_column=column, end_row=2, end_column=column + span - 1
             )
-        elif title == "Stock" and column == 21:
-            tsst_sheet.merge_cells(
-                start_row=2, start_column=column, end_row=3, end_column=column
-            )
         cell = tsst_sheet.cell(row=2, column=column, value=title)
         cell.font = Font(name="Calibri", size=11, bold=True)
         cell.alignment = Alignment(horizontal="center", vertical="center")
@@ -2200,7 +2569,7 @@ def _create_tsst_report_workbook():
         column += span
 
     for index, header in enumerate(sub_headers):
-        column = index + 2 + (1 if index >= 19 else 0)
+        column = index + 2
         cell = tsst_sheet.cell(row=3, column=column, value=header)
         cell.font = Font(name="Calibri", size=10, bold=True)
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -2213,7 +2582,7 @@ def _create_tsst_report_workbook():
     tsst_sheet.auto_filter.ref = f"A3:{get_column_letter(len(sub_headers) + 1)}3"
     tsst_sheet.column_dimensions["A"].width = 10
     for index, header in enumerate(sub_headers):
-        column = index + 2 + (1 if index >= 19 else 0)
+        column = index + 2
         width = min(max(len(header) + 2, 12), 34)
         tsst_sheet.column_dimensions[get_column_letter(column)].width = width
 
@@ -2315,62 +2684,256 @@ def download_tsst_weekly_report():
     )
 
 
+@app.route("/admin/download-complete-report", methods=["GET"])
 @app.route("/admin/download-tsst-complete-report", methods=["GET"])
 @app.route("/admin/download-complete-tsst-report", methods=["GET"])
+@app.route("/admin/download-tsst-excel", methods=["GET"])
 def download_tsst_complete_report():
     if not admin_required():
         return redirect(url_for("admin_login"))
 
+    conn = db()
+    try:
+        report_data = _load_tsst_report_data(conn)
+        _ensure_user_activation_schema(conn)
+        active_users = conn.execute(
+            """SELECT user_code,name,tsst_designation,headquarters,division,mobile_number
+               FROM users
+               WHERE role IN ('USER','MANAGER') AND is_active=TRUE
+               ORDER BY name"""
+        ).fetchall()
+    finally:
+        conn.close()
+
     workbook = _create_tsst_report_workbook()
-    weekly_sheet = workbook.create_sheet(title="Employee wise Weekly Tgt Vs Ach")
+    tsst_sheet = workbook["TSST"]
+    tsst_column_map = {
+        "asm_mis": 2,
+        "asm_name": 3,
+        "so_mis": 4,
+        "so_name": 5,
+        "employee_mis": 6,
+        "employee_name": 7,
+        "designation": 8,
+        "ss_sap": 9,
+        "depot": 10,
+        "db_type": 11,
+        "client_id": 12,
+        "distributor_name": 13,
+        "district": 14,
+        "town": 15,
+        "division": 16,
+        "working_days": 17,
+        "beats": 18,
+        "outlets": 19,
+        "opening": 20,
+        "primary_target": 21,
+        "secondary_target": 22,
+        "primary_achievement": 23,
+        "secondary_achievement": 24,
+        "closing": 25,
+    }
+    border = Border(
+        left=Side(style="thin", color="BFBFBF"),
+        right=Side(style="thin", color="BFBFBF"),
+        top=Side(style="thin", color="BFBFBF"),
+        bottom=Side(style="thin", color="BFBFBF"),
+    )
+    for row_number, row in enumerate(report_data["tsst"], start=4):
+        tsst_sheet.cell(row=row_number, column=1, value=row_number - 3)
+        for field, column in tsst_column_map.items():
+            value = row.get(field, "")
+            if field in {
+                "opening", "primary_target", "secondary_target",
+                "primary_achievement", "secondary_achievement", "closing",
+                "working_days", "beats", "outlets",
+            } and value != "":
+                value = float(value)
+            cell = tsst_sheet.cell(row=row_number, column=column, value=value)
+            cell.border = border
+            if field in {
+                "opening", "primary_target", "secondary_target",
+                "primary_achievement", "secondary_achievement", "closing",
+            }:
+                cell.number_format = "#,##0.00"
+        for column in range(1, 26):
+            tsst_sheet.cell(row=row_number, column=column).border = border
+    tsst_last_row = max(3, 3 + len(report_data["tsst"]))
+    tsst_sheet.auto_filter.ref = f"A3:Y{tsst_last_row}"
+    tsst_sheet.print_area = f"A1:Y{tsst_last_row}"
+
+    weekly_sheet = workbook.create_sheet(title="Weekly Target Vs Ach")
     weekly_sheet.views.sheetView[0].showGridLines = True
 
     dark_red_font = Font(name="Calibri", size=11, bold=True, color="C00000")
-    metadata = [
-        ("A1", "RSM/BDM NAME -->", "C1", ""),
-        ("A2", "STATE HEAD NAME -->", "C2", ""),
+    bold_font = Font(name="Calibri", size=10, bold=True)
+    green_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+    peach_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+    weekly_border = Border(
+        left=Side(style="thin", color="000000"),
+        right=Side(style="thin", color="000000"),
+        top=Side(style="thin", color="000000"),
+        bottom=Side(style="thin", color="000000"),
+    )
+    weekly_metadata = [
+        ("A1", "RSM/BDM NAME -->", "C1", report_data["metadata"].get("rsm_name", "")),
+        ("A2", "STATE HEAD NAME -->", "C2", report_data["metadata"].get("state_head", "")),
         ("A3", "STATE -->", "C3", "AP"),
     ]
-    for label_cell, label, value_cell, value in metadata:
+    for label_cell, label, value_cell, value in weekly_metadata:
         weekly_sheet[label_cell] = label
         weekly_sheet[label_cell].font = dark_red_font
         weekly_sheet[value_cell] = value
         weekly_sheet[value_cell].font = Font(name="Calibri", size=10, bold=True, color="1F4E78")
         weekly_sheet[value_cell].alignment = Alignment(horizontal="center")
 
-    weekly_sheet.merge_cells("G1:W1")
+    weekly_sheet.merge_cells("A1:B1")
+    weekly_sheet.merge_cells("C1:F1")
+    weekly_sheet.merge_cells("A2:B2")
+    weekly_sheet.merge_cells("C2:F2")
+    weekly_sheet.merge_cells("A3:B3")
+    weekly_sheet.merge_cells("G1:V1")
     weekly_sheet["G1"] = "Hamilton Sciences Pvt Ltd"
     weekly_sheet["G1"].font = Font(name="Calibri", size=14, bold=True, color="1F4E78")
     weekly_sheet["G1"].alignment = Alignment(horizontal="center", vertical="center")
-    weekly_sheet.merge_cells("G2:W2")
+    weekly_sheet.merge_cells("G2:V2")
     weekly_sheet["G2"] = "Weekly Primary & Secondary Target V/S Achievement Report"
     weekly_sheet["G2"].font = Font(name="Calibri", size=12, bold=True, color="1F4E78")
     weekly_sheet["G2"].alignment = Alignment(horizontal="center", vertical="center")
 
+    group_headers = [
+        ("G4:H4", "MONTHLY TARGET"),
+        ("I4:J4", "ACH. (1st to 7th)"),
+        ("K4:L4", "ACH. (8th to 15th)"),
+        ("M4:N4", "ACH. (16th to 22nd)"),
+        ("O4:P4", "ACH. (23rd to 31st)"),
+        ("Q4:T4", "TOTAL ACHIEVEMENT"),
+        ("U4:V4", "DIFFERENCE"),
+    ]
+    for cell_range, title in group_headers:
+        weekly_sheet.merge_cells(cell_range)
+        cell = weekly_sheet[cell_range.split(":")[0]]
+        cell.value = title
+        cell.font = bold_font
+        cell.fill = green_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = weekly_border
+
     weekly_headers = [
         "MIS CODE", "F. STAFF NAME", "DESIG.", "H.Q.", "DIV.", "MOBILE NO.",
-        "MONTHLY TARGET PRIMARY", "MONTHLY TARGET SECONDARY",
-        "ACH. (1st to 7th) PRI.", "ACH. (1st to 7th) SEC.",
-        "ACH. (8th to 15th) PRI.", "ACH. (8th to 15th) SEC.",
-        "ACH. (16th to 22nd) PRI.", "ACH. (16th to 22nd) SEC.",
-        "ACH. (23rd to 31st) PRI.", "ACH. (23rd to 31st) SEC.",
-        "TOTAL ACHIEVEMENT PRI.", "TOTAL ACHIEVEMENT SEC.",
-        "Ach. % PRI.", "Ach. % SEC.", "DIFFERENCE PRI.", "DIFFERENCE SEC.",
+        "PRIMARY", "SECONDARY",
+        "PRI.", "SEC.", "PRI.", "SEC.", "PRI.", "SEC.", "PRI.", "SEC.",
+        "PRI.", "SEC.", "Ach. %", "Ach. %", "PRI.", "SEC.",
     ]
-    weekly_sheet.row_dimensions[4].height = 42
+    weekly_sheet.row_dimensions[4].height = 30
+    weekly_sheet.row_dimensions[5].height = 42
     for column, header in enumerate(weekly_headers, 1):
-        cell = weekly_sheet.cell(row=4, column=column, value=header)
-        cell.font = Font(name="Calibri", size=10, bold=True)
-        cell.fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+        cell = weekly_sheet.cell(row=5, column=column, value=header)
+        cell.font = bold_font
+        cell.fill = green_fill
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        cell.border = Border(
-            left=Side(style="thin", color="BFBFBF"),
-            right=Side(style="thin", color="BFBFBF"),
-            top=Side(style="thin", color="BFBFBF"),
-            bottom=Side(style="thin", color="BFBFBF"),
+        cell.border = weekly_border
+        weekly_sheet.column_dimensions[get_column_letter(column)].width = (
+            15 if column == 2 else min(max(len(header) + 2, 11), 24)
         )
-        weekly_sheet.column_dimensions[get_column_letter(column)].width = min(max(len(header) + 2, 12), 30)
-    weekly_sheet.freeze_panes = "A5"
+    for row_number in range(1, 4):
+        for column in range(1, 23):
+            weekly_sheet.cell(row=row_number, column=column).border = weekly_border
+
+    weekly_column_map = {
+        "monthly_primary": 7,
+        "monthly_secondary": 8,
+        "week1_primary": 9,
+        "week1_secondary": 10,
+        "week2_primary": 11,
+        "week2_secondary": 12,
+        "week3_primary": 13,
+        "week3_secondary": 14,
+        "week4_primary": 15,
+        "week4_secondary": 16,
+    }
+    weekly_rows_by_code = {
+        str(row.get("mis_code", "")).strip().upper(): row
+        for row in report_data["weekly"]
+        if str(row.get("mis_code", "")).strip()
+    }
+    weekly_rows = []
+    matched_codes = set()
+    for user in active_users:
+        code = str(user["user_code"] or "").strip().upper()
+        saved_row = weekly_rows_by_code.get(code, {})
+        if code:
+            matched_codes.add(code)
+        weekly_rows.append({
+            **saved_row,
+            "mis_code": user["user_code"] or "",
+            "staff_name": user["name"] or "",
+            "designation": user["tsst_designation"] or "",
+            "hq": user["headquarters"] or "",
+            "division": user["division"] or "",
+            "mobile": user["mobile_number"] or "",
+        })
+    weekly_rows.extend(
+        row for row in report_data["weekly"]
+        if not str(row.get("mis_code", "")).strip()
+        or str(row.get("mis_code", "")).strip().upper() not in matched_codes
+    )
+
+    profile_fields = {
+        "mis_code": 1,
+        "staff_name": 2,
+        "designation": 3,
+        "hq": 4,
+        "division": 5,
+        "mobile": 6,
+    }
+    numeric_fields = set(weekly_column_map)
+    first_data_row = 6
+    for row_number, row in enumerate(weekly_rows, start=first_data_row):
+        for field, column in profile_fields.items():
+            weekly_sheet.cell(row=row_number, column=column, value=row.get(field, ""))
+        for field, column in weekly_column_map.items():
+            value = row.get(field, "")
+            if field in numeric_fields and value != "":
+                value = float(value)
+            cell = weekly_sheet.cell(row=row_number, column=column, value=value)
+            cell.border = weekly_border
+            cell.number_format = "#,##0.00"
+        weekly_sheet.cell(row=row_number, column=17, value=f"=SUM(I{row_number},K{row_number},M{row_number},O{row_number})")
+        weekly_sheet.cell(row=row_number, column=18, value=f"=SUM(J{row_number},L{row_number},N{row_number},P{row_number})")
+        weekly_sheet.cell(row=row_number, column=19, value=f"=IF(G{row_number}>0,Q{row_number}/G{row_number},0)")
+        weekly_sheet.cell(row=row_number, column=20, value=f"=IF(H{row_number}>0,R{row_number}/H{row_number},0)")
+        weekly_sheet.cell(row=row_number, column=21, value=f"=G{row_number}-Q{row_number}")
+        weekly_sheet.cell(row=row_number, column=22, value=f"=H{row_number}-R{row_number}")
+        for column in range(17, 23):
+            cell = weekly_sheet.cell(row=row_number, column=column)
+            cell.border = weekly_border
+            cell.number_format = "0.0%" if column in (19, 20) else "#,##0.00"
+
+    last_data_row = first_data_row + len(weekly_rows) - 1
+    total_row = last_data_row + 2
+    weekly_sheet.cell(row=total_row, column=2, value="TOTAL")
+    for column in range(1, 23):
+        cell = weekly_sheet.cell(row=total_row, column=column)
+        cell.font = bold_font
+        cell.fill = peach_fill
+        cell.border = weekly_border
+    for column in range(7, 19):
+        letter = get_column_letter(column)
+        formula = f"=SUM({letter}{first_data_row}:{letter}{last_data_row})" if weekly_rows else "=0"
+        weekly_sheet.cell(row=total_row, column=column, value=formula)
+        weekly_sheet.cell(row=total_row, column=column).number_format = "#,##0.00"
+    weekly_sheet.cell(row=total_row, column=19, value=f"=IF(G{total_row}>0,Q{total_row}/G{total_row},0)")
+    weekly_sheet.cell(row=total_row, column=20, value=f"=IF(H{total_row}>0,R{total_row}/H{total_row},0)")
+    weekly_sheet.cell(row=total_row, column=21, value=f"=G{total_row}-Q{total_row}")
+    weekly_sheet.cell(row=total_row, column=22, value=f"=H{total_row}-R{total_row}")
+    for column in range(19, 23):
+        weekly_sheet.cell(row=total_row, column=column).number_format = (
+            "0.0%" if column in (19, 20) else "#,##0.00"
+        )
+    weekly_sheet.freeze_panes = "A6"
+    weekly_sheet.auto_filter.ref = f"A5:V{last_data_row if weekly_rows else 5}"
+    weekly_sheet.print_area = f"A1:V{total_row}"
 
     output = io.BytesIO()
     workbook.save(output)
@@ -2380,6 +2943,65 @@ def download_tsst_complete_report():
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         as_attachment=True,
         download_name="A.P_TSST_Complete_Report.xlsx",
+    )
+
+
+@app.route("/admin/download-tsspdcl-excel", methods=["GET"])
+def download_tsspdcl_excel():
+    if not admin_required():
+        return redirect(url_for("admin_login"))
+    conn = db()
+    try:
+        rows = _load_tsst_report_data(conn)["tsspdcl"]
+    finally:
+        conn.close()
+
+    workbook = _create_tsst_report_workbook()
+    sheet = workbook["TSST"]
+    sheet.title = "TSSPDCL"
+    border = Border(
+        left=Side(style="thin", color="BFBFBF"),
+        right=Side(style="thin", color="BFBFBF"),
+        top=Side(style="thin", color="BFBFBF"),
+        bottom=Side(style="thin", color="BFBFBF"),
+    )
+    column_map = {
+        "asm_mis": 2, "asm_name": 3, "so_mis": 4, "so_name": 5,
+        "employee_mis": 6, "employee_name": 7, "designation": 8,
+        "ss_sap": 9, "depot": 10, "db_type": 11, "client_id": 12,
+        "distributor_name": 13, "district": 14, "town": 15, "division": 16,
+        "working_days": 17, "beats": 18, "outlets": 19, "opening": 20,
+        "primary_target": 21, "secondary_target": 22,
+        "primary_achievement": 23, "secondary_achievement": 24, "closing": 25,
+    }
+    numeric_fields = {
+        "working_days", "beats", "outlets", "opening", "primary_target",
+        "secondary_target", "primary_achievement", "secondary_achievement", "closing",
+    }
+    for row_number, row in enumerate(rows, start=4):
+        sheet.cell(row=row_number, column=1, value=row_number - 3)
+        for field, column in column_map.items():
+            value = row.get(field, "")
+            if field in numeric_fields and value not in ("", None):
+                value = float(value)
+            cell = sheet.cell(row=row_number, column=column, value=value)
+            cell.border = border
+            if field in numeric_fields and field not in {"working_days", "beats", "outlets"}:
+                cell.number_format = "#,##0.00"
+        for column in range(1, 26):
+            sheet.cell(row=row_number, column=column).border = border
+    last_row = max(3, 3 + len(rows))
+    sheet.auto_filter.ref = f"A3:Y{last_row}"
+    sheet.print_area = f"A1:Y{last_row}"
+
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return send_file(
+        output,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name="TSSPDCL_Report.xlsx",
     )
 
 
@@ -3190,6 +3812,39 @@ def register():
 
 from api_routes import api_bp
 app.register_blueprint(api_bp)
+
+@app.route("/api/get-users", methods=["GET"])
+def get_users():
+    if not login_required():
+        return jsonify({"success": False, "message": "Authentication required."}), 401
+    if not admin_required():
+        return jsonify({"success": False, "message": "Administrator access is required."}), 403
+
+    conn = db()
+    try:
+        _ensure_user_activation_schema(conn)
+        users = conn.execute(
+            """SELECT user_code,name,tsst_designation,headquarters,division,
+                      mobile_number,reporting_superior
+               FROM users
+               WHERE role IN ('USER','MANAGER') AND is_active=TRUE
+               ORDER BY name"""
+        ).fetchall()
+        return jsonify([
+            {
+                "mis_code": user["user_code"] or "",
+                "name": user["name"] or "",
+                "desig": user["tsst_designation"] or "",
+                "hq": user["headquarters"] or "",
+                "div": user["division"] or "",
+                "mobile": user["mobile_number"] or "",
+                "superior": user["reporting_superior"] or "",
+            }
+            for user in users
+        ])
+    finally:
+        conn.close()
+
 
 @app.route("/api/get-employee-mis/<int:user_id>", methods=["GET"])
 def get_employee_mis(user_id):
@@ -5533,22 +6188,32 @@ def admin_users():
             if action=="edit_profile":
                 uid=request.form.get("user_id", type=int)
                 name=request.form.get("name","").strip()
+                user_code=request.form.get("user_code","").strip().upper()
                 designation=request.form.get("designation","").strip().upper()
                 headquarters=request.form.get("headquarters","").strip()
                 mobile_number=request.form.get("mobile_number","").strip()
+                division=request.form.get("division","").strip()
+                reporting_superior=request.form.get("reporting_superior","").strip()
                 if not uid:
                     raise ValueError("Select a valid user.")
+                if not user_code or len(user_code)>100:
+                    raise ValueError("MIS Code is required and must be 100 characters or fewer.")
                 if not name:
                     raise ValueError("Employee Name is required.")
                 if designation not in {"", *VALID_ROLES}:
                     raise ValueError("Select a valid designation.")
-                if len(name)>200 or len(headquarters)>200 or len(mobile_number)>32:
-                    raise ValueError("Name and headquarters must be 200 characters or fewer; mobile number must be 32 characters or fewer.")
+                if (
+                    len(name) > 200 or len(headquarters) > 200
+                    or len(division) > 100 or len(reporting_superior) > 200
+                    or len(mobile_number) > 32
+                ):
+                    raise ValueError("Name, headquarters, division, and reporting superior must be within their character limits; mobile number must be 32 characters or fewer.")
                 result=conn.execute(
                     """UPDATE users
-                       SET name=?, tsst_designation=?, headquarters=?, mobile_number=?
+                       SET user_code=?, name=?, tsst_designation=?, headquarters=?, mobile_number=?,
+                           division=?, reporting_superior=?
                        WHERE id=?""",
-                    (name,designation,headquarters,mobile_number,uid)
+                    (user_code,name,designation,headquarters,mobile_number,division,reporting_superior,uid)
                 )
                 if result.rowcount!=1:
                     raise ValueError("User not found.")
@@ -5570,8 +6235,22 @@ def admin_users():
             confirm=request.form.get("confirm_password","")
             role=request.form.get("role","USER").strip().upper()
             code=request.form.get("user_code","").strip().upper() or email.split("@",1)[0].upper()
+            designation=request.form.get("designation","").strip().upper()
+            headquarters=request.form.get("headquarters","").strip()
+            mobile_number=request.form.get("mobile_number","").strip()
+            division=request.form.get("division","").strip()
+            reporting_superior=request.form.get("reporting_superior","").strip()
             if not name or not email or not password:
                 raise ValueError("Name, email and password are required.")
+            if not code or len(code)>100:
+                raise ValueError("MIS Code is required and must be 100 characters or fewer.")
+            if designation not in {"", *VALID_ROLES}:
+                raise ValueError("Select a valid designation.")
+            if (
+                len(name)>200 or len(headquarters)>200 or len(mobile_number)>32
+                or len(division)>100 or len(reporting_superior)>200
+            ):
+                raise ValueError("One or more profile fields exceed the allowed length.")
             if role not in ("USER","MANAGER","ADMIN"):
                 raise ValueError("Invalid role selected.")
             if len(password)<8:
@@ -5580,8 +6259,17 @@ def admin_users():
                 raise ValueError("Passwords do not match.")
             # Profile image data is intentionally left untouched for existing users,
             # but new users are created without an image because the Admin UI no longer manages photos.
-            conn.execute("INSERT INTO users(name,email,password,role,created_at,user_code) VALUES(?,?,?,?,?,?)",
-                         (name,email,generate_password_hash(password),role,datetime.now().isoformat(timespec="seconds"),code))
+            conn.execute(
+                """INSERT INTO users(
+                       name,email,password,role,created_at,user_code,tsst_designation,
+                       headquarters,mobile_number,division,reporting_superior
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    name,email,generate_password_hash(password),role,
+                    datetime.now().isoformat(timespec="seconds"),code,designation,
+                    headquarters,mobile_number,division,reporting_superior
+                )
+            )
             conn.commit()
             flash(f"{role.title()} account created successfully.","success")
             return redirect(url_for("admin_users"))
@@ -5591,7 +6279,7 @@ def admin_users():
         conn.rollback(); flash(str(e),"danger")
     users=conn.execute(
         """SELECT id,name,user_code,email,role,created_at,is_active,tsst_designation,
-                  headquarters,mobile_number
+                  headquarters,mobile_number,division,reporting_superior
            FROM users ORDER BY id DESC"""
     ).fetchall()
     active_admin_count=conn.execute(
@@ -5602,6 +6290,244 @@ def admin_users():
         "admin/users.html", users=users, active_admin_count=active_admin_count,
         valid_designations=VALID_ROLES
     )
+
+
+@app.route("/admin/download-project-zip", methods=["GET"])
+def download_project_zip():
+    if not admin_required():
+        return redirect(url_for("admin_login"))
+
+    project_root = os.path.dirname(BASE_DIR)
+    source_directories = {
+        "android", "app", "lib", "my_api_server", "my_nest_api_server",
+        "smr_purehome_mobile", "test",
+    }
+    root_files = {
+        ".gitignore", ".metadata", "analysis_options.yaml", "pubspec.lock",
+        "pubspec.yaml", "README.md",
+    }
+    excluded_directories = {
+        ".dart_tool", ".git", ".gradle", ".idea", ".pytest_cache", ".venv",
+        ".vscode", "__pycache__", "build", "cache", "coverage", "data",
+        "data_files", "dist", "instance", "node_modules", "reports", "uploads",
+    }
+    excluded_extensions = {
+        ".apk", ".cer", ".crt", ".csv", ".db", ".jks", ".keystore", ".log",
+        ".p12", ".p8", ".pem", ".pfx", ".sqlite", ".sqlite3", ".xls", ".xlsx",
+        ".zip",
+    }
+    excluded_filenames = {
+        "firebase_options.dart", "google-services.json", "google-services.xml",
+        "google-services.plist", "googleservice-info.plist",
+    }
+
+    def is_sensitive_or_generated(filename):
+        lowered = filename.lower()
+        extension = os.path.splitext(lowered)[1]
+        return (
+            lowered.startswith((".env", "secret", "credential", "service-account"))
+            or lowered in excluded_filenames
+            or lowered.endswith((".key", ".pem", ".p12", ".pfx"))
+            or extension in excluded_extensions
+        )
+
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as project_zip:
+        for current_root, directories, filenames in os.walk(project_root, followlinks=False):
+            relative_root = os.path.relpath(current_root, project_root)
+            path_parts = () if relative_root == "." else tuple(relative_root.split(os.sep))
+            if not path_parts:
+                directories[:] = [
+                    name for name in directories
+                    if name in source_directories and name not in excluded_directories
+                    and not os.path.islink(os.path.join(current_root, name))
+                ]
+                filenames = [name for name in filenames if name in root_files]
+            else:
+                directories[:] = [
+                    name for name in directories
+                    if name.lower() not in excluded_directories
+                    and not os.path.islink(os.path.join(current_root, name))
+                ]
+
+            if any(part.lower() in excluded_directories for part in path_parts):
+                directories[:] = []
+                continue
+            for filename in filenames:
+                file_path = os.path.join(current_root, filename)
+                if (
+                    is_sensitive_or_generated(filename)
+                    or os.path.islink(file_path)
+                    or not os.path.isfile(file_path)
+                ):
+                    continue
+                archive_name = os.path.relpath(file_path, project_root).replace(os.sep, "/")
+                project_zip.write(file_path, archive_name)
+
+    archive.seek(0)
+    return send_file(
+        archive,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name="SMR_PureHome_Project_Source.zip",
+    )
+
+
+@app.route("/api/update-user", methods=["POST"])
+def update_user():
+    if not admin_required():
+        return jsonify({"status": "error", "message": "Administrator access is required."}), 403
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        payload = request.form
+    old_mis_code = str(payload.get("old_mis_code") or "").strip().upper()
+    user_code = str(payload.get("mis_code") or "").strip().upper()
+    name = str(payload.get("user_name") or "").strip()
+    designation = str(payload.get("designation") or "").strip().upper()
+    headquarters = str(payload.get("hq") or "").strip()
+    division = str(payload.get("division") or "").strip()
+    mobile_number = str(payload.get("mobile") or "").strip()
+
+    if not old_mis_code or not user_code:
+        return jsonify({"status": "error", "message": "Old and new MIS codes are required."}), 400
+    if not name:
+        return jsonify({"status": "error", "message": "Employee name is required."}), 400
+    if designation not in {"", *VALID_ROLES}:
+        return jsonify({"status": "error", "message": "Select a valid designation."}), 400
+    if (
+        len(old_mis_code) > 100 or len(user_code) > 100 or len(name) > 200
+        or len(headquarters) > 200 or len(division) > 100 or len(mobile_number) > 32
+    ):
+        return jsonify({"status": "error", "message": "One or more fields exceed the allowed length."}), 400
+
+    conn = db()
+    try:
+        _ensure_user_activation_schema(conn)
+        user = conn.execute(
+            "SELECT id FROM users WHERE UPPER(TRIM(COALESCE(user_code,'')))=?",
+            (old_mis_code,)
+        ).fetchone()
+        if not user:
+            return jsonify({"status": "error", "message": "User with the old MIS code was not found."}), 404
+        conn.execute(
+            """UPDATE users
+               SET user_code=?, name=?, tsst_designation=?, headquarters=?,
+                   division=?, mobile_number=?
+               WHERE id=?""",
+            (user_code, name, designation, headquarters, division, mobile_number, user["id"])
+        )
+        conn.commit()
+        return jsonify({"status": "success", "message": "User details and MIS Code updated successfully!"})
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        return jsonify({"status": "error", "message": "That MIS code is already assigned to another user."}), 409
+    finally:
+        conn.close()
+
+
+@app.route("/api/transfer-user", methods=["POST"])
+def transfer_user():
+    if not admin_required():
+        return jsonify({"status": "error", "message": "Administrator access is required."}), 403
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        payload = request.form
+    from_mis = str(payload.get("transfer_from_mis") or "").strip().upper()
+    to_mis = str(payload.get("new_replacement_mis") or "").strip().upper()
+    if not from_mis or not to_mis:
+        return jsonify({"status": "error", "message": "Source and replacement MIS codes are required."}), 400
+    if from_mis == to_mis:
+        return jsonify({"status": "error", "message": "Choose a different replacement employee."}), 400
+
+    conn = db()
+    try:
+        _ensure_user_activation_schema(conn)
+        source = conn.execute(
+            """SELECT id,name,user_code FROM users
+               WHERE UPPER(TRIM(COALESCE(user_code,'')))=? AND is_active=TRUE""",
+            (from_mis,)
+        ).fetchone()
+        replacement = conn.execute(
+            """SELECT id,name,user_code FROM users
+               WHERE UPPER(TRIM(COALESCE(user_code,'')))=? AND is_active=TRUE""",
+            (to_mis,)
+        ).fetchone()
+        if not source or not replacement:
+            return jsonify({"status": "error", "message": "Both source and replacement must be active users."}), 404
+
+        dealer_result = conn.execute(
+            """UPDATE dealers SET emp_code=?, emp_name=?
+               WHERE UPPER(TRIM(COALESCE(emp_code,'')))=?
+                  OR (TRIM(COALESCE(emp_code,''))='' AND LOWER(TRIM(COALESCE(emp_name,'')))=?)""",
+            (replacement["user_code"], replacement["name"], from_mis.lower(), str(source["name"] or "").strip().lower())
+        )
+        transferred_dealers = dealer_result.rowcount
+
+        mappings = conn.execute(
+            """SELECT id,dealer_id,beat_name,repeat_days FROM beat_mappings
+               WHERE user_id=? AND active=1""",
+            (source["id"],)
+        ).fetchall()
+        now = datetime.now().isoformat(timespec="seconds")
+        transferred_beats = 0
+        for mapping in mappings:
+            existing = conn.execute(
+                """SELECT id FROM beat_mappings
+                   WHERE user_id=? AND dealer_id=? AND beat_name=?""",
+                (replacement["id"], mapping["dealer_id"], mapping["beat_name"])
+            ).fetchone()
+            if existing:
+                conn.execute(
+                    "UPDATE beat_mappings SET active=0,updated_at=? WHERE id=?",
+                    (now, mapping["id"])
+                )
+                conn.execute(
+                    "UPDATE beat_mappings SET active=1,updated_at=? WHERE id=?",
+                    (now, existing["id"])
+                )
+            else:
+                conn.execute(
+                    "UPDATE beat_mappings SET user_id=?,updated_at=? WHERE id=?",
+                    (replacement["id"], now, mapping["id"])
+                )
+            transferred_beats += 1
+
+        source_names = {
+            str(source["name"] or "").strip().lower(),
+            from_mis.lower(),
+        } - {""}
+        subteam_rows = conn.execute(
+            """SELECT id,reporting_superior FROM users
+               WHERE id NOT IN (?,?)
+                 AND LOWER(TRIM(COALESCE(reporting_superior,''))) IN ({})""".format(
+                    ",".join("?" for _ in source_names) or "NULL"
+               ),
+            (source["id"], replacement["id"], *sorted(source_names))
+        )
+        subteam_ids = [row["id"] for row in subteam_rows.fetchall()]
+        if subteam_ids:
+            placeholders = ",".join("?" for _ in subteam_ids)
+            conn.execute(
+                f"UPDATE users SET reporting_superior=? WHERE id IN ({placeholders})",
+                (replacement["name"], *subteam_ids)
+            )
+
+        conn.commit()
+        return jsonify({
+            "status": "success",
+            "message": "Handover and transfer executed successfully!",
+            "dealer_mappings_transferred": transferred_dealers,
+            "beat_mappings_transferred": transferred_beats,
+            "subteam_members_reassigned": len(subteam_ids),
+            "source_account_remains_active": True,
+        })
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        return jsonify({"status": "error", "message": "Transfer could not be completed because it conflicts with existing assignments."}), 409
+    finally:
+        conn.close()
 
 
 @app.route("/admin/managers", methods=["GET", "POST"])

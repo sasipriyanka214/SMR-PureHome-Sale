@@ -1,0 +1,187 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Employee Wise Weekly Report{% endblock %}
+{% block admin_content %}
+<style>
+  .weekly-report-table th,
+  .weekly-report-table td {
+    font-size: 10px;
+    vertical-align: middle;
+    white-space: nowrap;
+  }
+  .weekly-report-table input {
+    width: 65px;
+    min-width: 65px;
+    padding: 2px;
+    text-align: center;
+    font-size: 11px;
+  }
+</style>
+<div class="container-fluid mt-3 mb-5">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+    <h2 class="text-primary mb-0">Weekly Primary &amp; Secondary Target V/S Achievement Report</h2>
+    <div class="d-flex flex-wrap gap-2">
+      <button id="saveWeeklyReport" type="button" class="btn btn-primary">
+        <i class="fas fa-save me-1" aria-hidden="true"></i>Save Changes
+      </button>
+      <a href="{{ url_for('tsst_reports_portal') }}" class="btn btn-secondary">
+        <i class="fas fa-exchange-alt me-1" aria-hidden="true"></i>Go to TSST Report
+      </a>
+      <a href="{{ url_for('download_tsst_complete_report') }}" class="btn btn-success">
+        <i class="fas fa-file-excel me-1" aria-hidden="true"></i>Download Excel
+      </a>
+    </div>
+  </div>
+
+  <div class="card shadow-sm p-2 bg-white border-0">
+    <p id="weeklyReportStatus" class="small text-muted mb-2" role="status" aria-live="polite">
+      Loading weekly report…
+    </p>
+    <div class="table-responsive">
+      <table class="table table-bordered text-center align-middle mb-0 weekly-report-table">
+        <thead class="table-success">
+          <tr>
+            <th rowspan="2" scope="col">MIS CODE</th>
+            <th rowspan="2" scope="col">F. STAFF NAME</th>
+            <th rowspan="2" scope="col">DESIG.</th>
+            <th rowspan="2" scope="col">H.Q.</th>
+            <th rowspan="2" scope="col">DIV.</th>
+            <th rowspan="2" scope="col">MOBILE NO.</th>
+            <th colspan="2" scope="colgroup">MONTHLY TARGET</th>
+            <th colspan="2" scope="colgroup">ACH. (1st to 7th)</th>
+            <th colspan="2" scope="colgroup">ACH. (8th to 15th)</th>
+            <th colspan="2" scope="colgroup">ACH. (16th to 22nd)</th>
+            <th colspan="2" scope="colgroup">ACH. (23rd to 31st)</th>
+          </tr>
+          <tr>
+            <th scope="col">PRI.</th><th scope="col">SEC.</th>
+            <th scope="col">PRI.</th><th scope="col">SEC.</th>
+            <th scope="col">PRI.</th><th scope="col">SEC.</th>
+            <th scope="col">PRI.</th><th scope="col">SEC.</th>
+            <th scope="col">PRI.</th><th scope="col">SEC.</th>
+          </tr>
+        </thead>
+        <tbody id="weeklyTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const weeklyTableBody = document.getElementById('weeklyTableBody');
+const weeklyStatus = document.getElementById('weeklyReportStatus');
+const weeklyEditableFields = [
+  'monthly_primary', 'monthly_secondary',
+  'week1_primary', 'week1_secondary',
+  'week2_primary', 'week2_secondary',
+  'week3_primary', 'week3_secondary',
+  'week4_primary', 'week4_secondary'
+];
+let weeklyDataList = [];
+
+const renderWeeklyTable = rows => {
+  weeklyTableBody.replaceChildren();
+  rows.forEach(reportRow => {
+    const row = document.createElement('tr');
+    [
+      ['mis_code', reportRow.mis_code],
+      ['staff_name', reportRow.name || reportRow.staff_name],
+      ['designation', reportRow.desig || reportRow.designation],
+      ['hq', reportRow.hq],
+      ['division', reportRow.div || reportRow.division],
+      ['mobile', reportRow.mobile],
+    ].forEach(([field, value]) => {
+      const cell = row.insertCell();
+      cell.dataset.field = field;
+      cell.textContent = value || '—';
+    });
+
+    weeklyEditableFields.forEach(field => {
+      const cell = row.insertCell();
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.min = '0';
+      input.step = '0.01';
+      input.className = 'form-control form-control-sm';
+      input.dataset.field = field;
+      input.setAttribute('aria-label', `${field.replaceAll('_', ' ')} for ${reportRow.mis_code || 'employee'}`);
+      const legacyField = {
+        monthly_primary: 'pri_target',
+        monthly_secondary: 'sec_target',
+        week1_primary: 'w1_pri',
+        week1_secondary: 'w1_sec',
+        week2_primary: 'w2_pri',
+        week2_secondary: 'w2_sec',
+        week3_primary: 'w3_pri',
+        week3_secondary: 'w3_sec',
+        week4_primary: 'w4_pri',
+        week4_secondary: 'w4_sec'
+      }[field];
+      input.value = reportRow[field] ?? reportRow[legacyField] ?? '';
+      cell.appendChild(input);
+    });
+    weeklyTableBody.appendChild(row);
+  });
+};
+
+const loadWeeklyData = async () => {
+  try {
+    const response = await fetch('{{ url_for("get_weekly_data") }}', {
+      credentials: 'same-origin'
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || 'Could not load weekly report.');
+    if (!Array.isArray(data)) throw new Error('The weekly report response is invalid.');
+    weeklyDataList = data;
+    renderWeeklyTable(weeklyDataList);
+    weeklyStatus.textContent = data.length
+      ? `${data.length} employee(s) in the weekly report.`
+      : 'No active employees or saved weekly report rows found.';
+  } catch (error) {
+    weeklyStatus.textContent = error.message || 'Could not load weekly report.';
+    weeklyStatus.classList.remove('text-muted');
+    weeklyStatus.classList.add('text-danger');
+  }
+};
+
+document.getElementById('saveWeeklyReport').addEventListener('click', async event => {
+  const button = event.currentTarget;
+  const weeklyRows = [...weeklyTableBody.rows].map(row => {
+    const reportRow = {};
+    row.querySelectorAll('[data-field]').forEach(cell => {
+      const field = cell.dataset.field;
+      if (cell instanceof HTMLInputElement) {
+        reportRow[field] = cell.value.trim();
+      } else {
+        reportRow[field] = cell.textContent.trim() === '—' ? '' : cell.textContent.trim();
+      }
+    });
+    return reportRow;
+  });
+
+  button.disabled = true;
+  weeklyStatus.textContent = 'Saving weekly report…';
+  weeklyStatus.classList.remove('text-danger');
+  weeklyStatus.classList.add('text-muted');
+  try {
+    const response = await fetch('{{ url_for("save_weekly_data") }}', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ weekly_rows: weeklyRows })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.message || 'Could not save weekly report.');
+    weeklyStatus.textContent = result.message || 'Weekly report data saved.';
+  } catch (error) {
+    weeklyStatus.textContent = error.message || 'Could not save weekly report.';
+    weeklyStatus.classList.remove('text-muted');
+    weeklyStatus.classList.add('text-danger');
+  } finally {
+    button.disabled = false;
+  }
+});
+
+loadWeeklyData();
+</script>
+{% endblock %}

@@ -50,3 +50,8 @@ per-process key and existing sessions are invalidated when the process restarts.
 
 ## SMR / SS Backup Data
 The Admin sidebar now includes `SMR & Backup Data`. It keeps the SMR workbook and the three SS backup workbooks in separate `data_files` folders. Uploading a new workbook replaces the previous workbook in that same section; the file can be downloaded and edited in Excel.
+
+## TSST reports
+The Admin `TSST Reports` page provides the complete Excel download and a weekly target/achievement table with active employee and manager details. It matches saved target and achievement figures by MIS code and displays totals, achievement percentages, and differences. Previously saved weekly rows without a matching active account are retained. The `/api/get-users` endpoint returns active employee and manager profile details and is restricted to Admin accounts.
+
+Admins can edit user Division and Reporting Superior / Boss fields on the `Users & Access` page. The TSST Reports page displays these active-user details alongside designation, headquarters, and mobile number.

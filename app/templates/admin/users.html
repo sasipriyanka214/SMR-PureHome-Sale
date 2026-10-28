@@ -3,22 +3,56 @@
 {% block admin_content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <div>
-    <h2>Users &amp; Access</h2>
-    <p class="text-muted mb-0">Manage employee details, designations and account access.</p>
+    <h2><i class="fas fa-users-cog me-2" aria-hidden="true"></i>Existing Users &amp; Staff Directory</h2>
+    <p class="text-muted mb-0">Manage employee MIS codes, details, designations and account access.</p>
   </div>
 </div>
 
-<div class="panel mb-4">
-  <h5>+ Add User</h5>
+<div class="card shadow-sm border-0 p-4 mb-4 bg-white" id="add-user">
+  <h5 class="text-success mb-3"><i class="fas fa-user-plus me-2" aria-hidden="true"></i>Add New User</h5>
   <form method="post" class="row g-3">
     <input type="hidden" name="action" value="add">
-    <div class="col-md-4"><label class="form-label">User Code</label><input class="form-control" name="user_code" placeholder="e.g. MIS10476" required></div>
-    <div class="col-md-4"><label class="form-label">User Name</label><input class="form-control" name="name" required></div>
-    <div class="col-md-4"><label class="form-label">Email</label><input class="form-control" type="email" name="email" required></div>
-    <div class="col-md-4"><label class="form-label">Password</label><input class="form-control" type="password" name="password" minlength="8" required></div>
-    <div class="col-md-4"><label class="form-label">Confirm Password</label><input class="form-control" type="password" name="confirm_password" minlength="8" required></div>
-    <div class="col-md-4"><label class="form-label">Account Role</label><select class="form-select" name="role"><option value="USER">USER</option><option value="MANAGER">MANAGER</option><option value="ADMIN">ADMIN</option></select></div>
-    <div class="col-12"><button class="btn btn-success">Add User</button></div>
+    <div class="col-md-4"><label class="form-label fw-bold">MIS Code</label><input class="form-control" name="user_code" placeholder="e.g. MIS10476" maxlength="100" required></div>
+    <div class="col-md-4"><label class="form-label fw-bold">User Name</label><input class="form-control" name="name" placeholder="Enter full name" maxlength="200" required></div>
+    <div class="col-md-4"><label class="form-label fw-bold">Email</label><input class="form-control" type="email" name="email" placeholder="user@smr.com" required></div>
+    <div class="col-md-4"><label class="form-label fw-bold">Mobile Number</label><input class="form-control" type="tel" name="mobile_number" placeholder="Mobile number" maxlength="32" required></div>
+    <div class="col-md-4"><label class="form-label fw-bold">Headquarters (H.Q.)</label><input class="form-control" name="headquarters" placeholder="e.g. Guntur" maxlength="200" required></div>
+    <div class="col-md-4"><label class="form-label fw-bold">Designation</label><select class="form-select" name="designation" required><option value="">Select designation</option>{% for designation in valid_designations %}<option value="{{designation}}">{{'BDM / AISY' if designation == 'BDM' else designation}}</option>{% endfor %}</select></div>
+    <div class="col-md-4"><label class="form-label fw-bold">Division</label><input class="form-control" name="division" placeholder="e.g. V2" maxlength="100" required></div>
+    <div class="col-md-4"><label class="form-label fw-bold">Reporting Superior / Boss</label><input class="form-control" name="reporting_superior" placeholder="Reporting superior" maxlength="200"></div>
+    <div class="col-md-4"><label class="form-label fw-bold">Account Role</label><select class="form-select" name="role"><option value="USER">USER</option><option value="MANAGER">MANAGER</option><option value="ADMIN">ADMIN</option></select></div>
+    <div class="col-md-4"><label class="form-label fw-bold">Password</label><input class="form-control" type="password" name="password" minlength="8" required></div>
+    <div class="col-md-4"><label class="form-label fw-bold">Confirm Password</label><input class="form-control" type="password" name="confirm_password" minlength="8" required></div>
+    <div class="col-12"><button class="btn btn-success" type="submit"><i class="fas fa-user-plus me-1" aria-hidden="true"></i>Add New User</button></div>
+  </form>
+</div>
+
+<div class="panel mb-4">
+  <h5><i class="fas fa-exchange-alt me-2" aria-hidden="true"></i>Transfer / Handover</h5>
+  <p class="text-muted">Move dealer ownership and active beat mappings to a replacement employee, and reassign staff reporting to the source. The source account remains active; historical beat mappings are retained.</p>
+  <form id="transfer-user-form" class="row g-3">
+    <div class="col-md-5">
+      <label class="form-label" for="transfer-from-mis">Transfer from</label>
+      <select class="form-select" id="transfer-from-mis" name="transfer_from_mis" required>
+        <option value="">Select source employee</option>
+        {% for u in users if u.is_active and u.user_code %}
+        <option value="{{u.user_code}}">{{u.user_code}} — {{u.name}}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-5">
+      <label class="form-label" for="replacement-mis">Replacement employee</label>
+      <select class="form-select" id="replacement-mis" name="new_replacement_mis" required>
+        <option value="">Select replacement employee</option>
+        {% for u in users if u.is_active and u.user_code %}
+        <option value="{{u.user_code}}">{{u.user_code}} — {{u.name}}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2 d-flex align-items-end">
+      <button class="btn btn-warning w-100" type="submit"><i class="fas fa-exchange-alt me-1" aria-hidden="true"></i>Transfer</button>
+    </div>
+    <div class="col-12"><p id="transfer-user-status" class="small mb-0" role="status" aria-live="polite"></p></div>
   </form>
 </div>
 
@@ -31,6 +65,8 @@
         <th>Role / Designation</th>
         <th>Headquarters (H.Q.)</th>
         <th>Mobile Number</th>
+        <th>Division</th>
+        <th>Reporting Superior / Boss</th>
         <th>Email</th>
         <th>Account Status</th>
         <th>Created</th>
@@ -40,7 +76,7 @@
     <tbody>
       {% for u in users %}
       <tr>
-        <td><span class="badge bg-dark">{{u.user_code or '-'}}</span></td>
+        <td><input form="edit-user-{{u.id}}" class="form-control form-control-sm text-center" name="user_code" value="{{u.user_code or ''}}" maxlength="100" aria-label="MIS code for {{u.name}}" required></td>
         <td><input form="edit-user-{{u.id}}" class="form-control form-control-sm" name="name" value="{{u.name}}" maxlength="200" aria-label="Employee name for {{u.user_code or u.email}}" required></td>
         <td>
           <select form="edit-user-{{u.id}}" class="form-select form-select-sm" name="designation" aria-label="Designation for {{u.name}}">
@@ -52,6 +88,8 @@
         </td>
         <td><input form="edit-user-{{u.id}}" class="form-control form-control-sm" name="headquarters" value="{{u.headquarters or ''}}" maxlength="200" aria-label="Headquarters for {{u.name}}"></td>
         <td><input form="edit-user-{{u.id}}" class="form-control form-control-sm" name="mobile_number" type="tel" value="{{u.mobile_number or ''}}" maxlength="32" aria-label="Mobile number for {{u.name}}"></td>
+        <td><input form="edit-user-{{u.id}}" class="form-control form-control-sm" name="division" value="{{u.division or ''}}" maxlength="100" aria-label="Division for {{u.name}}"></td>
+        <td><input form="edit-user-{{u.id}}" class="form-control form-control-sm" name="reporting_superior" value="{{u.reporting_superior or ''}}" maxlength="200" aria-label="Reporting superior for {{u.name}}"></td>
         <td>{{u.email}}</td>
         <td><span class="badge {{'bg-success' if u.is_active else 'bg-danger'}}">{{'Active' if u.is_active else 'Inactive'}}</span></td>
         <td>{{u.created_at}}</td>
@@ -67,9 +105,58 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="9" class="text-center py-4">No users.</td></tr>
+      <tr><td colspan="11" class="text-center py-4">No users.</td></tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
+{% endblock %}
+{% block scripts %}
+<script>
+const transferForm = document.getElementById('transfer-user-form');
+const transferSource = document.getElementById('transfer-from-mis');
+const transferReplacement = document.getElementById('replacement-mis');
+const transferStatus = document.getElementById('transfer-user-status');
+
+const updateReplacementOptions = () => {
+  [...transferReplacement.options].forEach(option => {
+    option.disabled = Boolean(option.value && option.value === transferSource.value);
+  });
+  if (transferReplacement.value === transferSource.value) transferReplacement.value = '';
+};
+
+transferSource.addEventListener('change', updateReplacementOptions);
+transferForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  if (transferSource.value === transferReplacement.value) {
+    transferStatus.textContent = 'Choose a different replacement employee.';
+    transferStatus.className = 'small mb-0 text-danger';
+    return;
+  }
+  if (!window.confirm(`Transfer dealer mappings, active beats, and reporting team from ${transferSource.value} to ${transferReplacement.value}?`)) return;
+
+  const button = transferForm.querySelector('button[type="submit"]');
+  button.disabled = true;
+  transferStatus.textContent = 'Processing transfer…';
+  transferStatus.className = 'small mb-0 text-muted';
+  try {
+    const response = await fetch('{{ url_for("transfer_user") }}', {
+      method: 'POST',
+      credentials: 'same-origin',
+      body: new FormData(transferForm)
+    });
+    const result = await response.json();
+    if (!response.ok || result.status !== 'success') {
+      throw new Error(result.message || 'Transfer could not be completed.');
+    }
+    transferStatus.textContent = `${result.message} Dealer mappings: ${result.dealer_mappings_transferred}; beat mappings: ${result.beat_mappings_transferred}; staff reassigned: ${result.subteam_members_reassigned}.`;
+    transferStatus.className = 'small mb-0 text-success';
+  } catch (error) {
+    transferStatus.textContent = error.message || 'Transfer could not be completed.';
+    transferStatus.className = 'small mb-0 text-danger';
+  } finally {
+    button.disabled = false;
+  }
+});
+</script>
 {% endblock %}
