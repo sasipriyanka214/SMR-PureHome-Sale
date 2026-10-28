@@ -42,14 +42,6 @@
 <div class="container-fluid bg-dark py-2 mb-3">
 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
 <h4 class="text-white m-0">SMR PureHome Sales Portal</h4>
-<div class="d-flex flex-wrap gap-2">
-<a href="{{ url_for('tsspdcl_report_portal') }}" class="btn {{ 'btn-light fw-bold' if request.endpoint == 'tsspdcl_report_portal' else 'btn-outline-light' }} btn-sm"{% if request.endpoint == 'tsspdcl_report_portal' %} aria-current="page"{% endif %}>
-<i class="fas fa-table me-1" aria-hidden="true"></i>TSSPDCL Report
-</a>
-<a href="{{ url_for('weekly_report_portal') }}" class="btn {{ 'btn-light fw-bold' if request.endpoint == 'weekly_report_portal' else 'btn-outline-light' }} btn-sm"{% if request.endpoint == 'weekly_report_portal' %} aria-current="page"{% endif %}>
-<i class="fas fa-calendar-alt me-1" aria-hidden="true"></i>Employee Weekly Report
-</a>
-</div>
 </div>
 </div>
 {% endif %}

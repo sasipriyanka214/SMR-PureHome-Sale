@@ -3,7 +3,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 import os, io, csv, re, json
 import math
 import zipfile
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import calendar
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -1435,6 +1435,12 @@ def _ensure_user_activation_schema(conn):
     _user_activation_schema_ready = True
 
 
+def _ensure_dealer_contact_schema(conn):
+    conn.execute("ALTER TABLE dealers ADD COLUMN IF NOT EXISTS contact_number TEXT NOT NULL DEFAULT ''")
+    conn.execute("ALTER TABLE dealers ADD COLUMN IF NOT EXISTS address TEXT NOT NULL DEFAULT ''")
+    conn.commit()
+
+
 def _ensure_tsst_schema(conn):
     global _tsst_schema_ready
     if _tsst_schema_ready:
@@ -1762,6 +1768,82 @@ def admin_product_targets():
         conn.close()
 
 
+def _save_dealer_targets_bulk(conn, month_year, form):
+    dealer_ids = form.getlist("dealer_id[]")
+    target_values = form.getlist("target_amount[]")
+    achievement_values = form.getlist("achievement_amount[]")
+    saved_count = 0
+    for index, raw_dealer_id in enumerate(dealer_ids):
+        try:
+            dealer_id = int(raw_dealer_id)
+            target_amount = float(target_values[index] if index < len(target_values) else 0)
+            achieved_amount = float(achievement_values[index] if index < len(achievement_values) else 0)
+        except (TypeError, ValueError, IndexError):
+            raise ValueError("All target and achievement amounts must be valid numbers.")
+        if (
+            dealer_id < 1
+            or not math.isfinite(target_amount) or target_amount < 0
+            or not math.isfinite(achieved_amount) or achieved_amount < 0
+        ):
+            raise ValueError("Dealer records and amounts must be valid non-negative values.")
+
+        dealer = conn.execute(
+            "SELECT id,dealer_name,sap_code FROM dealers WHERE id=? AND active=1",
+            (dealer_id,),
+        ).fetchone()
+        if not dealer:
+            raise ValueError(f"Dealer ID {dealer_id} was not found.")
+
+        sap_code = str(dealer["sap_code"] or "").strip()
+        existing = conn.execute(
+            "SELECT id FROM dealer_targets WHERE sap_code=? AND month_year=? ORDER BY id LIMIT 1",
+            (sap_code, month_year),
+        ).fetchone() if sap_code else conn.execute(
+            "SELECT id FROM dealer_targets WHERE dealer_name=? AND month_year=? ORDER BY id LIMIT 1",
+            (dealer["dealer_name"], month_year),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE dealer_targets SET dealer_name=?,sap_code=?,target_amount=?,achieved_amount=?,month_year=? WHERE id=?",
+                (dealer["dealer_name"], sap_code, target_amount, achieved_amount, month_year, existing["id"]),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO dealer_targets(dealer_name,sap_code,target_amount,achieved_amount,month_year) VALUES(?,?,?,?,?)",
+                (dealer["dealer_name"], sap_code, target_amount, achieved_amount, month_year),
+            )
+        saved_count += 1
+    return saved_count
+
+
+@app.route("/save_dealer_targets", methods=["POST"])
+def save_dealer_targets():
+    if not admin_required():
+        return redirect(url_for("admin_login"))
+    month_year = (request.form.get("month_year") or datetime.now().strftime("%Y-%m")).strip()
+    if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month_year):
+        abort(400, description="Choose a valid target month.")
+
+    conn = db()
+    try:
+        _ensure_tsst_schema(conn)
+        saved_count = _save_dealer_targets_bulk(conn, month_year, request.form)
+        conn.commit()
+        flash(f"{saved_count} dealer target records saved successfully.", "success")
+        return redirect(url_for("dealer_targets", month_year=month_year))
+    except ValueError as exc:
+        conn.rollback()
+        flash(str(exc), "danger")
+        return redirect(url_for("dealer_targets", month_year=month_year))
+    except sqlite3.Error:
+        conn.rollback()
+        app.logger.exception("Could not save bulk dealer targets")
+        flash("Could not save dealer targets because of a database error.", "danger")
+        return redirect(url_for("dealer_targets", month_year=month_year))
+    finally:
+        conn.close()
+
+
 @app.route("/admin/dealer-targets", methods=["GET", "POST"])
 def dealer_targets():
     if not admin_required():
@@ -1784,6 +1866,9 @@ def dealer_targets():
                         raise ValueError("Select a valid dealer target to delete.")
                     conn.execute("DELETE FROM dealer_targets WHERE id=?", (target_id,))
                     flash("Dealer target record deleted.", "success")
+                elif action == "bulk":
+                    saved_count = _save_dealer_targets_bulk(conn, month_year, request.form)
+                    flash(f"{saved_count} dealer target records saved successfully.", "success")
                 elif action in {"add", "update"}:
                     dealer_name = request.form.get("dealer_name", "").strip()
                     sap_code = request.form.get("sap_code", "").strip()
@@ -1833,7 +1918,28 @@ def dealer_targets():
                FROM dealer_targets WHERE month_year=? ORDER BY dealer_name,id""",
             (month_year,)
         ).fetchall()
-        return render_template("admin/dealer_targets.html", targets=targets, month_year=month_year)
+        dealer_rows = conn.execute(
+            """SELECT d.id,d.dealer_name,d.sap_code,d.town
+               FROM dealers d WHERE d.active=1
+               ORDER BY d.dealer_name,d.sap_code"""
+        ).fetchall()
+        target_by_sap = {
+            str(row["sap_code"] or "").strip().upper(): row
+            for row in targets if str(row["sap_code"] or "").strip()
+        }
+        dealers = []
+        for dealer in dealer_rows:
+            existing = target_by_sap.get(str(dealer["sap_code"] or "").strip().upper())
+            dealers.append({
+                "id": dealer["id"],
+                "name": dealer["dealer_name"],
+                "dealer_name": dealer["dealer_name"],
+                "sap_code": dealer["sap_code"] or "",
+                "town": dealer["town"] or "",
+                "target": existing["target_amount"] if existing else 0,
+                "achievement": existing["achieved_amount"] if existing else 0,
+            })
+        return render_template("admin/dealer_targets.html", targets=targets, dealers=dealers, month_year=month_year)
     finally:
         conn.close()
 
@@ -5920,13 +6026,39 @@ def admin_home():
 def admin_dashboard():
     if not admin_required():
         return redirect(url_for("admin_login"))
-    selected_date=(request.args.get("date") or datetime.now().strftime("%Y-%m-%d")).strip()
+    now = datetime.now()
+    default_start = now.replace(day=1).strftime("%Y-%m-%d")
+    default_end = now.replace(day=calendar.monthrange(now.year, now.month)[1]).strftime("%Y-%m-%d")
+    legacy_date = (request.args.get("date") or "").strip()
+    start_date = (request.args.get("start_date") or legacy_date or default_start).strip()
+    end_date = (request.args.get("end_date") or legacy_date or default_end).strip()
+    try:
+        datetime.strptime(start_date, "%Y-%m-%d")
+        datetime.strptime(end_date, "%Y-%m-%d")
+    except ValueError:
+        start_date, end_date = default_start, default_end
+    if start_date > end_date:
+        start_date, end_date = end_date, start_date
+
     conn = db()
     stats = {
         "products": conn.execute("SELECT COUNT(*) c FROM products").fetchone()["c"],
         "users": conn.execute("SELECT COUNT(*) c FROM users WHERE role IN ('USER','MANAGER')").fetchone()["c"],
-        "orders": conn.execute("SELECT COUNT(*) c FROM orders").fetchone()["c"],
-        "sales": conn.execute("SELECT COALESCE(SUM(total_amount),0) s FROM orders WHERE status IN ('CONFIRMED','COMPLETED')").fetchone()["s"],
+        "orders": conn.execute("""
+            SELECT COUNT(*) c FROM orders
+            WHERE (CASE WHEN NULLIF(CAST(billing_date AS TEXT),'') IS NOT NULL
+                        THEN CAST(billing_date AS DATE)
+                        ELSE CAST(order_date AS TIMESTAMP)::date END)
+                  BETWEEN ?::date AND ?::date
+        """, (start_date, end_date)).fetchone()["c"],
+        "sales": conn.execute("""
+            SELECT COALESCE(SUM(total_amount),0) s FROM orders
+            WHERE status IN ('CONFIRMED','COMPLETED')
+              AND (CASE WHEN NULLIF(CAST(billing_date AS TEXT),'') IS NOT NULL
+                        THEN CAST(billing_date AS DATE)
+                        ELSE CAST(order_date AS TIMESTAMP)::date END)
+                  BETWEEN ?::date AND ?::date
+        """, (start_date, end_date)).fetchone()["s"],
     }
     monthly = conn.execute("""
         SELECT TO_CHAR(CAST(order_date AS TIMESTAMP), 'YYYY-MM') AS month, SUM(total_amount) AS sales
@@ -5956,11 +6088,107 @@ def admin_dashboard():
         FROM orders o
         JOIN users u ON u.id=o.user_id
         LEFT JOIN dealers d ON d.id=o.dealer_id
-       WHERE (CASE WHEN NULLIF(CAST(o.billing_date AS TEXT),'') IS NOT NULL THEN CAST(o.billing_date AS DATE) ELSE CAST(o.order_date AS TIMESTAMP)::date END) = ?::date
+       WHERE (CASE WHEN NULLIF(CAST(o.billing_date AS TEXT),'') IS NOT NULL THEN CAST(o.billing_date AS DATE) ELSE CAST(o.order_date AS TIMESTAMP)::date END)
+             BETWEEN ?::date AND ?::date
         ORDER BY o.id DESC
-    """, (selected_date,)).fetchall()
+    """, (start_date, end_date)).fetchall()
     conn.close()
-    return render_template("admin/dashboard.html", stats=stats, monthly=monthly, recent=recent, selected_date=selected_date)
+    return render_template("admin/dashboard.html", stats=stats, monthly=monthly, recent=recent,
+                           selected_date=end_date, start_date=start_date, end_date=end_date)
+
+@app.route("/reports/export/excel", methods=["GET"])
+def export_dealer_reports():
+    if not admin_required():
+        return redirect(url_for("admin_login"))
+
+    selected_month = (request.args.get("month") or datetime.now().strftime("%Y-%m")).strip()
+    if not re.match(r"^\d{4}-\d{2}$", selected_month):
+        abort(400, description="Month must use the YYYY-MM format.")
+    try:
+        month_start = datetime.strptime(selected_month + "-01", "%Y-%m-%d").date()
+    except ValueError:
+        abort(400, description="Invalid month.")
+    month_end = month_start + timedelta(days=32)
+    month_end = month_end.replace(day=1) - timedelta(days=1)
+
+    conn = db()
+    try:
+        rows = conn.execute("""
+            SELECT COALESCE(d.dealer_name, 'Unknown Dealer') AS dealer_name,
+                   COALESCE(d.town, '') AS town,
+                   CASE WHEN NULLIF(CAST(o.billing_date AS TEXT),'') IS NOT NULL
+                        THEN CAST(o.billing_date AS DATE)
+                        ELSE CAST(o.order_date AS TIMESTAMP)::date END AS order_date,
+                   COALESCE(o.total_amount, 0) AS total_amount,
+                   o.status AS billing_status
+            FROM orders o
+            LEFT JOIN dealers d ON d.id=o.dealer_id
+            WHERE (CASE WHEN NULLIF(CAST(o.billing_date AS TEXT),'') IS NOT NULL
+                        THEN CAST(o.billing_date AS DATE)
+                        ELSE CAST(o.order_date AS TIMESTAMP)::date END)
+                  BETWEEN ?::date AND ?::date
+            ORDER BY order_date DESC, dealer_name, d.town
+        """, (month_start.isoformat(), month_end.isoformat())).fetchall()
+    finally:
+        conn.close()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Dealer Sales Report"
+    headers = ["Dealer Name", "Town", "Order Date", "Sales Amount", "Billing Status"]
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(1, col, header)
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center")
+    for row_index, row in enumerate(rows, 2):
+        values = [row["dealer_name"], row["town"], row["order_date"],
+                  float(row["total_amount"] or 0), row["billing_status"]]
+        for col, value in enumerate(values, 1):
+            ws.cell(row_index, col, value)
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:E{max(1, ws.max_row)}"
+    for col, width in enumerate([30, 20, 16, 18, 18], 1):
+        ws.column_dimensions[get_column_letter(col)].width = width
+    for row in ws.iter_rows(min_row=2, min_col=3, max_col=3):
+        row[0].number_format = "dd-mm-yyyy"
+    for row in ws.iter_rows(min_row=2, min_col=4, max_col=4):
+        row[0].number_format = "#,##0.00"
+
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+    return send_file(
+        bio,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name=f"SMR_Dealer_Sales_Report_{selected_month}.xlsx",
+    )
+
+
+@app.route("/update_employee_code", methods=["POST"])
+def update_employee_code():
+    if not admin_required():
+        return jsonify({"success": False, "message": "Administrator access is required."}), 403
+    payload = request.get_json(silent=True) or request.form
+    emp_id = payload.get("emp_id")
+    new_mis_code = str(payload.get("mis_code") or "").strip().upper()
+    if not emp_id or not new_mis_code:
+        return jsonify({"success": False, "message": "Employee ID and MIS code are required."}), 400
+
+    conn = db()
+    try:
+        user = conn.execute("SELECT id FROM users WHERE id=?", (emp_id,)).fetchone()
+        if not user:
+            return jsonify({"success": False, "message": "Employee not found."}), 404
+        conn.execute("UPDATE users SET user_code=? WHERE id=?", (new_mis_code, emp_id))
+        conn.commit()
+        return jsonify({"success": True, "message": "Employee MIS Code updated successfully"})
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        return jsonify({"success": False, "message": "That MIS code is already assigned to another user."}), 409
+    finally:
+        conn.close()
+
 
 @app.route("/admin/products")
 def admin_products():
@@ -6635,6 +6863,7 @@ def admin_dealers():
         return redirect(url_for("admin_login"))
     conn=db()
     try:
+        _ensure_dealer_contact_schema(conn)
         if request.method=="POST":
             action=request.form.get("action","map").strip().lower()
             if action=="add_dealer":
@@ -6668,7 +6897,22 @@ def admin_dealers():
 @app.route("/admin/orders")
 def admin_orders():
     if not admin_required(): return redirect(url_for("admin_login"))
-    selected_date=(request.args.get("date") or datetime.now().strftime("%Y-%m-%d")).strip()
+    now = datetime.now()
+    start_date=(request.args.get("start_date") or now.replace(day=1).strftime("%Y-%m-%d")).strip()
+    end_date=(request.args.get("end_date") or now.strftime("%Y-%m-%d")).strip()
+    legacy_date=(request.args.get("date") or "").strip()
+    if legacy_date and not request.args.get("start_date") and not request.args.get("end_date"):
+        start_date = legacy_date
+        end_date = legacy_date
+    try:
+        datetime.strptime(start_date, "%Y-%m-%d")
+        datetime.strptime(end_date, "%Y-%m-%d")
+    except ValueError:
+        start_date = now.replace(day=1).strftime("%Y-%m-%d")
+        end_date = now.strftime("%Y-%m-%d")
+    if start_date > end_date:
+        start_date, end_date = end_date, start_date
+
     conn=db()
     orders=conn.execute("""
         SELECT o.*, u.name customer, u.email,
@@ -6693,21 +6937,23 @@ def admin_orders():
         FROM orders o
         JOIN users u ON u.id=o.user_id
         LEFT JOIN dealers d ON d.id=o.dealer_id
-       WHERE (CASE WHEN NULLIF(CAST(o.billing_date AS TEXT),'') IS NOT NULL THEN CAST(o.billing_date AS DATE) ELSE CAST(o.order_date AS TIMESTAMP)::date END) = ?::date
+       WHERE (CASE WHEN NULLIF(CAST(o.billing_date AS TEXT),'') IS NOT NULL THEN CAST(o.billing_date AS DATE) ELSE CAST(o.order_date AS TIMESTAMP)::date END)
+             BETWEEN ?::date AND ?::date
         ORDER BY o.id DESC
-    """, (selected_date,)).fetchall()
+    """, (start_date, end_date)).fetchall()
     pending_orders_count = sum(1 for order in orders if order["display_status"] == "PENDING")
     conn.close()
-    return render_template("admin/orders.html", orders=orders, selected_date=selected_date, pending_orders_count=pending_orders_count)
+    return render_template("admin/orders.html", orders=orders, selected_date=end_date,
+                           start_date=start_date, end_date=end_date, pending_orders_count=pending_orders_count)
 
 @app.route("/admin/orders/<int:order_id>/status", methods=["POST"])
 def admin_order_status(order_id):
     if not admin_required(): return redirect(url_for("admin_login"))
     status=normalize_order_status(request.form.get("status","PENDING")); conn=db()
     row=conn.execute("SELECT id FROM orders WHERE id=?",(order_id,)).fetchone()
-    if not row: conn.close(); flash("Order not found.","danger"); return redirect(url_for("admin_orders",date=request.form.get("date") or None))
+    if not row: conn.close(); flash("Order not found.","danger"); return redirect(url_for("admin_orders", start_date=request.form.get("start_date") or None, end_date=request.form.get("end_date") or request.form.get("date") or None))
     conn.execute("UPDATE orders SET status=? WHERE id=?",(status,order_id)); sync_primary_order_from_order(conn,order_id); conn.commit(); conn.close()
-    flash(f"Order status updated to {status}.","success"); return redirect(url_for("admin_orders",date=request.form.get("date") or None))
+    flash(f"Order status updated to {status}.","success"); return redirect(url_for("admin_orders", start_date=request.form.get("start_date") or None, end_date=request.form.get("end_date") or request.form.get("date") or None))
 
 @app.route("/my-orders/<int:order_id>/export.xlsx")
 def my_order_excel(order_id):

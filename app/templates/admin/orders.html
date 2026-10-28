@@ -9,21 +9,25 @@
   <a class="btn btn-outline-secondary" href="{{url_for('admin_dashboard')}}">← Back</a>
 </div>
 
-<form class="row g-2 mb-3" method="get">
-  <div class="col-sm-5 col-md-3">
-    <label class="form-label mb-0 small">Billing Date</label>
-    <input class="form-control" type="date" name="date" value="{{selected_date}}" onchange="this.form.submit()">
+<form method="GET" action="{{ url_for('admin_orders') }}" class="row g-3 mb-4">
+  <div class="col-auto">
+    <label class="form-label" for="adminOrdersStart">From Date:</label>
+    <input id="adminOrdersStart" type="date" name="start_date" value="{{ start_date }}" class="form-control" required>
   </div>
-  <div class="col-sm-2 col-md-2 d-flex align-items-end">
-    <a class="btn btn-outline-secondary w-100" href="{{url_for('admin_orders')}}">Today</a>
+  <div class="col-auto">
+    <label class="form-label" for="adminOrdersEnd">To Date:</label>
+    <input id="adminOrdersEnd" type="date" name="end_date" value="{{ end_date }}" class="form-control" required>
+  </div>
+  <div class="col-auto align-self-end">
+    <button type="submit" class="btn btn-primary">Filter Orders</button>
   </div>
 </form>
 
-<div class="alert alert-info">Showing only orders billed on <b>{{selected_date}}</b>. Select another date to view that day's records.</div>
+<div class="alert alert-info">Showing orders billed from <b>{{start_date}}</b> to <b>{{end_date}}</b>.</div>
 
 {% if pending_orders_count > 0 %}
 <div class="alert alert-warning alert-dismissible fade show" role="alert">
-  <strong>Attention!</strong> {{pending_orders_count}} order(s) are pending approval for this date.
+  <strong>Attention!</strong> {{pending_orders_count}} order(s) are pending approval for this date range.
   <a href="#pending-orders-section" class="alert-link">Review orders</a>.
   <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
 </div>
@@ -59,7 +63,8 @@
         <td><strong>₹{{"%.2f"|format(o.total_amount)}}</strong></td>
         <td>
           <form method="post" action="{{url_for('admin_order_status',order_id=o.id)}}">
-            <input type="hidden" name="date" value="{{selected_date}}">
+            <input type="hidden" name="start_date" value="{{start_date}}">
+            <input type="hidden" name="end_date" value="{{end_date}}">
             <select class="form-select form-select-sm" name="status" onchange="this.form.submit()" aria-label="Dealer order status">
               <option value="PENDING" {% if o.display_status=='PENDING' %}selected{% endif %}>Pending</option>
               <option value="CONFIRMED" {% if o.display_status=='CONFIRMED' %}selected{% endif %}>Confirmed</option>
@@ -70,7 +75,8 @@
         <td>
           {% if o.display_status == 'PENDING' %}
           <form method="post" action="{{url_for('admin_order_status',order_id=o.id)}}">
-            <input type="hidden" name="date" value="{{selected_date}}">
+            <input type="hidden" name="start_date" value="{{start_date}}">
+            <input type="hidden" name="end_date" value="{{end_date}}">
             <input type="hidden" name="status" value="CONFIRMED">
             <button class="btn btn-sm btn-success" type="submit">Confirm</button>
           </form>
@@ -81,7 +87,7 @@
         <td><a href="{{url_for('admin_order_excel',order_id=o.id)}}" class="btn btn-sm btn-outline-success">⬇ Excel</a></td>
       </tr>
       {% else %}
-      <tr><td colspan="9" class="text-center py-5">No billed orders for {{selected_date}}.</td></tr>
+      <tr><td colspan="9" class="text-center py-5">No billed orders from {{start_date}} to {{end_date}}.</td></tr>
       {% endfor %}
     </tbody>
   </table>
