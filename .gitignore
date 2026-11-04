@@ -45,3 +45,8 @@ coverage/
 .DS_Store
 Thumbs.db
 Desktop.ini
+/build/
+/.dart_tool/
+.pub/
+.flutter-plugins
+.flutter-plugins-dependencies
