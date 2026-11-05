@@ -3485,40 +3485,7 @@ def download_perfect_weekly_report():
         ("O4:P4", "ACH. (23rd to 31st)"),
         ("Q4:R4", "TOTAL ACHIEVEMENT"),
         ("S4:T4", "DIFFERENCE"),
-    except Exception as exc:
-        app.logger.exception("Operation failed")
-        solution = get_ai_bug_fix(str(exc), code_context=...)
-        app.logger.info("AI diagnostic:\n%s", solution)
-        return jsonify({"error": "Operation failed. Please try again."}), 500        except Exception as exc:
-            app.logger.exception("Operation failed")
-            solution = get_ai_bug_fix(str(exc), code_context=...)
-            app.logger.info("AI diagnostic:\n%s", solution)
-            return jsonify({"error": "Operation failed. Please try again."}), 500            except Exception as exc:
-                app.logger.exception("Operation failed")
-                solution = get_ai_bug_fix(str(exc), code_context=...)
-                app.logger.info("AI diagnostic:\n%s", solution)
-                return jsonify({"error": "Operation failed. Please try again."}), 500                except Exception as exc:
-                    app.logger.exception("Operation failed")
-                    solution = get_ai_bug_fix(str(exc), code_context=...)
-                    app.logger.info("AI diagnostic:\n%s", solution)
-                    return jsonify({"error": "Operation failed. Please try again."}), 500                    bp = Blueprint("main", __name__)
-                    
-                    @bp.route("/submit-order", methods=["POST"])
-                    def submit_order():
-                        try:
-                            # Core business logic
-                            return jsonify({
-                                "success": True,
-                                "message": "Order processed successfully."
-                            }), 200
-                        except Exception as exc:
-                            logging.getLogger(__name__).exception(
-                                "Internal error occurred during order submission"
-                            )
-                            return jsonify({
-                                "success": False,
-                                "message": "Something went wrong while processing your request. Please try again later or contact support."
-                            }), 500    ):
+    ):
         weekly_sheet.merge_cells(cell_range)
         weekly_sheet[cell_range.split(":")[0]] = title
     weekly_sheet["U4"] = "PRIMARY 1ST TO 29TH"
