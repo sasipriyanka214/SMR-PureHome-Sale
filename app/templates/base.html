@@ -70,8 +70,27 @@
 
 {% if request.endpoint != 'index' %}<div class="container"><button type="button" class="btn btn-sm btn-outline-secondary my-2 mobile-back" data-fallback-url="{{ url_for('index') }}" onclick="if(history.length>1){history.back()}else{location.href=this.dataset.fallbackUrl}">← Back</button></div>{% endif %}
 {% block content %}{% endblock %}
+{% if logged_user %}
+<button class="ai-assistant-launcher" id="aiAssistantLauncher" type="button" aria-label="Open AI sales assistant" aria-expanded="false">
+  <span class="ai-launcher-icon">✦</span><span>AI Assistant</span>
+</button>
+<section class="ai-assistant-panel" id="aiAssistantPanel" aria-label="AI sales assistant" hidden>
+  <header class="ai-assistant-header">
+    <div><strong>SMR AI Assistant</strong><small>Sales report help</small></div>
+    <button type="button" id="aiAssistantClose" aria-label="Close assistant">×</button>
+  </header>
+  <div class="ai-assistant-messages" id="aiAssistantMessages" aria-live="polite">
+    <div class="ai-message ai-message-bot">Hello! Ask me about your current sales target, achievement, remaining sales, or product targets.</div>
+  </div>
+  <form class="ai-assistant-form" id="aiAssistantForm">
+    <input id="aiAssistantInput" type="text" maxlength="2000" autocomplete="off" placeholder="Ask about sales..." aria-label="Assistant message">
+    <button type="submit" aria-label="Send message">Send</button>
+  </form>
+</section>
+{% endif %}
 
 <footer class="footer mt-5"><div class="container py-4 text-center">SMR Sales & Product Management System · Free local project</div></footer>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+{% if logged_user %}<script src="{{ url_for('static', filename='js/script.js') }}"></script>{% endif %}
 {% block scripts %}{% endblock %}
 </body></html>
