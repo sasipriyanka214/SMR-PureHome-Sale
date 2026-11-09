@@ -1,4 +1,6 @@
 Flask
-openpyxl
+Flask-SQLAlchemy
 gunicorn
-werkzeug
+psycopg2-binary
+openai
+openpyxl
