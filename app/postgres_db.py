@@ -47,6 +47,16 @@ def _rewrite_script(script: str) -> list[str]:
     return statements
 
 
+def _row_to_dict(row, desc):
+    if row is None:
+        return None
+    if isinstance(row, dict):
+        return dict(row)
+    if isinstance(row, (tuple, list)) and desc:
+        return {desc[i][0]: row[i] for i in range(min(len(desc), len(row)))}
+    return row
+
+
 class PGCursor:
     def __init__(self, conn, cursor):
         self._conn = conn
@@ -62,11 +72,12 @@ class PGCursor:
         if re.match(r'^\s*INSERT\s+INTO\s+([\w]+)', sql, flags=re.I):
             try:
                 row = self._cursor.fetchone()
-                if row:
-                    if isinstance(row, dict):
-                        self.lastrowid = row.get('id')
+                drow = _row_to_dict(row, self._cursor.description)
+                if drow:
+                    if isinstance(drow, dict):
+                        self.lastrowid = drow.get('id')
                     else:
-                        self.lastrowid = row[0]
+                        self.lastrowid = drow[0]
                 else:
                     self.lastrowid = None
             except Exception:
@@ -75,23 +86,17 @@ class PGCursor:
 
     def fetchone(self):
         row = self._cursor.fetchone()
-        if row and not isinstance(row, dict):
-            # Convert tuple to dict if column names are available
-            desc = self._cursor.description
-            if desc:
-                return {desc[i][0]: row[i] for i in range(len(desc))}
-        return row
+        return _row_to_dict(row, self._cursor.description)
 
     def fetchall(self):
         rows = self._cursor.fetchall()
-        if rows and not isinstance(rows[0], dict):
-            desc = self._cursor.description
-            if desc:
-                return [{desc[i][0]: row[i] for i in range(len(desc))} for row in rows]
-        return rows
+        desc = self._cursor.description
+        return [_row_to_dict(r, desc) for r in rows] if rows else []
 
     def __iter__(self):
-        return iter(self._cursor)
+        desc = self._cursor.description
+        for row in self._cursor:
+            yield _row_to_dict(row, desc)
 
     @property
     def rowcount(self):
