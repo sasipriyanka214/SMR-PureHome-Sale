@@ -34,7 +34,7 @@ app.config["SESSION_COOKIE_NAME"] = "smr_sales_session_v2"
 if __package__:
     from .postgres_db import db
 else:
-    from postgres_db:: db  # use normal import
+    from postgres_db import db
 
 VALID_ROLES = ["TSI", "SO", "ASM", "DSM", "BDM", "RSM"]
 
