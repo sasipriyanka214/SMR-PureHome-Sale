@@ -138,3 +138,5 @@ def db():
             'Supabase PostgreSQL is not configured. Set SUPABASE_DB_URL (or DATABASE_URL) in the environment.'
         )
     return PGConnection(url)
+from flask_sqlalchemy import SQLAlchemy
+db = SQLAlchemy()
