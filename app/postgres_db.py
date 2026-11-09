@@ -2,6 +2,15 @@ import os
 import re
 try:
     import psycopg
+    from psycopg.rows import dict_row
+except ImportError:
+    import psycopg2 as psycopg
+    dict_row = None
+
+import os
+import re
+try:
+    import psycopg
 except ImportError:
     import psycopg2 as psycopg
 
