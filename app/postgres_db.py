@@ -1,3 +1,5 @@
+import os
+import re
 try:
     import psycopg
 except ImportError:
