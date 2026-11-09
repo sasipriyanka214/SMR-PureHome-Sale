@@ -1,45 +1,30 @@
 import os
 import re
+
 try:
     import psycopg
     from psycopg.rows import dict_row
+    USE_PSYCOPG3 = True
 except ImportError:
     import psycopg2 as psycopg
-    dict_row = None
-
-import os
-import re
-try:
-    import psycopg
-except ImportError:
-    import psycopg2 as psycopg
+    from psycopg2.extras import RealDictCursor
+    USE_PSYCOPG3 = False
 
 
 def _rewrite_sql(sql: str) -> str:
-    # Keep the existing application's SQLite-style ? placeholders so the
-    # application code does not need a risky 2,900-line rewrite.
     sql = sql.replace('INSERT OR IGNORE INTO', 'INSERT INTO')
-    # SQLite scalar MAX(a,b) is PostgreSQL GREATEST(a,b).
     sql = re.sub(r'\bMAX\(0\s*,', 'GREATEST(0,', sql, flags=re.I)
-    # SQLite instr(text, subtext) -> PostgreSQL strpos(text, subtext)
     sql = re.sub(r'\binstr\s*\(', 'strpos(', sql, flags=re.I)
-    # SQLite GROUP_CONCAT(expr, sep) -> PostgreSQL string_agg(expr, sep).
     sql = re.sub(r'\bGROUP_CONCAT\s*\(', 'string_agg(', sql, flags=re.I)
-    # SQLite printf('%.2f', value) -> PostgreSQL numeric formatting.
     sql = re.sub(r"printf\('\%\.2f'\s*,\s*([^\)]+)\)", r"to_char(\1, 'FM9999999990.00')", sql, flags=re.I)
-    # Parameter placeholders.
     sql = sql.replace('?', '%s')
     sql = re.sub(r'%(?![sbt%])', '%%', sql)
-    # INSERT OR IGNORE semantics after the replacement above. PostgreSQL
-    # accepts a final ON CONFLICT clause without naming a constraint.
     if re.match(r'^\s*INSERT\s+INTO\b', sql, flags=re.I) and 'ON CONFLICT' not in sql.upper() and 'RETURNING' not in sql.upper():
         sql = sql.rstrip().rstrip(';') + ' ON CONFLICT DO NOTHING'
     return sql
 
 
 def _rewrite_script(script: str) -> list[str]:
-    # Project schema scripts contain no procedural semicolons, so a simple
-    # splitter is sufficient and keeps the existing init_db logic intact.
     statements = []
     current = []
     quote = None
@@ -70,8 +55,6 @@ class PGCursor:
 
     def execute(self, sql, params=None):
         sql = _rewrite_sql(sql)
-        # The existing Flask app uses cursor.lastrowid after INSERTs. PostgreSQL
-        # has no SQLite-style lastrowid, so fetch the generated id with RETURNING.
         if re.match(r'^\s*INSERT\s+INTO\s+([\w]+)', sql, flags=re.I) and 'RETURNING' not in sql.upper():
             sql = sql.rstrip().rstrip(';') + ' RETURNING id'
         self._cursor.execute(sql, params or ())
@@ -79,16 +62,33 @@ class PGCursor:
         if re.match(r'^\s*INSERT\s+INTO\s+([\w]+)', sql, flags=re.I):
             try:
                 row = self._cursor.fetchone()
-                self.lastrowid = row['id'] if row else None
-            except psycopg.ProgrammingError:
+                if row:
+                    if isinstance(row, dict):
+                        self.lastrowid = row.get('id')
+                    else:
+                        self.lastrowid = row[0]
+                else:
+                    self.lastrowid = None
+            except Exception:
                 self.lastrowid = None
         return self
 
     def fetchone(self):
-        return self._cursor.fetchone()
+        row = self._cursor.fetchone()
+        if row and not isinstance(row, dict):
+            # Convert tuple to dict if column names are available
+            desc = self._cursor.description
+            if desc:
+                return {desc[i][0]: row[i] for i in range(len(desc))}
+        return row
 
     def fetchall(self):
-        return self._cursor.fetchall()
+        rows = self._cursor.fetchall()
+        if rows and not isinstance(rows[0], dict):
+            desc = self._cursor.description
+            if desc:
+                return [{desc[i][0]: row[i] for i in range(len(desc))} for row in rows]
+        return rows
 
     def __iter__(self):
         return iter(self._cursor)
@@ -100,20 +100,22 @@ class PGCursor:
 
 class PGConnection:
     def __init__(self, url):
-        self._conn = psycopg.connect(url, row_factory=dict_row)
+        if USE_PSYCOPG3:
+            self._conn = psycopg.connect(url, row_factory=dict_row)
+        else:
+            self._conn = psycopg.connect(url, cursor_factory=RealDictCursor)
 
     def execute(self, sql, params=None):
-        # SQLite PRAGMA compatibility used only for schema-column discovery.
         m = re.match(r'^\s*PRAGMA\s+table_info\(([^\)]+)\)\s*$', sql, flags=re.I)
         if m:
             table = m.group(1).strip().strip('"')
             cur = self._conn.cursor()
-            cur.execute("""
+            cur.execute(\"\"\"
                 SELECT column_name AS name
                 FROM information_schema.columns
                 WHERE table_schema='public' AND table_name=%s
                 ORDER BY ordinal_position
-            """, (table,))
+            \"\"\", (table,))
             return cur
         if re.match(r'^\s*PRAGMA\s+foreign_keys\s*=', sql, flags=re.I):
             return PGCursor(self, self._conn.cursor())
@@ -121,7 +123,6 @@ class PGConnection:
 
     def executescript(self, script):
         for stmt in _rewrite_script(script):
-            # PostgreSQL identity columns replace SQLite AUTOINCREMENT.
             stmt = re.sub(
                 r'INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT',
                 'BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY',
