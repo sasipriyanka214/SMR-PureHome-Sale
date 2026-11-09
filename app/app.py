@@ -32,9 +32,9 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY") or os.urandom(32)
 app.config["SESSION_COOKIE_NAME"] = "smr_sales_session_v2"
 
 if __package__:
-   from .postgres_db import db
+    from .postgres_db import db
 else:
-    from postgres_db import db
+    from postgres_db:: db  # use normal import
 
 VALID_ROLES = ["TSI", "SO", "ASM", "DSM", "BDM", "RSM"]
 
