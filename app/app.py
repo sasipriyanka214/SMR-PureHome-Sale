@@ -31,7 +31,10 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY") or os.urandom(32)
 # Versioned cookie name invalidates older local sessions after this Home update.
 app.config["SESSION_COOKIE_NAME"] = "smr_sales_session_v2"
 
-from postgres_db import db
+if __package__:
+    from .postgres_db import db
+else:
+    from postgres_db import db
 
 VALID_ROLES = ["TSI", "SO", "ASM", "DSM", "BDM", "RSM"]
 
@@ -3986,7 +3989,10 @@ def register():
                 conn.close()
     return render_template("register.html")
 
-from api_routes import api_bp
+if __package__:
+    from .api_routes import api_bp
+else:
+    from api_routes import api_bp
 app.register_blueprint(api_bp)
 
 @app.route("/api/get-users", methods=["GET"])
