@@ -1,7 +1,7 @@
-import os
-import re
-import psycopg2 as psycopg
-from psycopg.rows import dict_row
+try:
+    import psycopg
+except ImportError:
+    import psycopg2 as psycopg
 
 
 def _rewrite_sql(sql: str) -> str:
